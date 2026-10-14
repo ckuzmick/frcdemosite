@@ -367,7 +367,7 @@ kbd, .key { display: inline-grid; place-items: center; min-width: 22px; height: 
 
     <ol class="howto">
       <li><b>Shoot right away</b>You start with 8 fuel, already inside the green ring and facing the hub. Hold <kbd>Space</kbd>. The shooter spins up for 1&nbsp;second, then feeds.</li>
-      <li><b>Collect more fuel</b>The intake is on the <b>back</b> of the robot, opposite the amber arrow. Press <kbd>2</kbd> to start the rollers, then back into the yellow balls in the middle of the field.</li>
+      <li><b>Collect more fuel</b>The intake is on the <b>back</b> of the robot, opposite the amber arrow. Press <kbd>2</kbd> to start the rollers, then back up (<kbd>S</kbd>) into the yellow balls in the middle of the field. They roll under the intake roller and get pulled in.</li>
       <li><b>Score again</b>Drive back into the green ring, face the hub, and hold <kbd>Space</kbd>. Or hold <kbd>F</kbd> and the camera will aim the robot for you.</li>
     </ol>
 
@@ -418,10 +418,10 @@ kbd, .key { display: inline-grid; place-items: center; min-width: 22px; height: 
           <p class="note" style="margin-top:6px">One controller does everything. With a second controller plugged in, it becomes the operator. Press any button so the browser detects it.</p>
         </div>
         <div class="dir-note">
-          <p><b>Heads up:</b> the code drives toward the robot's <b>back</b> when you push the stick forward, and spins left when you push the turn stick right. That is what the Java says. The real robot's wheel setup may cancel it out.</p>
+          <p><b>Directions:</b> <kbd>W</kbd> drives forward, toward the amber arrow, and <kbd>E</kbd> turns right. The Java's raw signs are flipped (stick-forward drives toward the back); switch to them here if you want to feel exactly what the code does.</p>
           <div class="btns">
-            <button type="button" class="btn primary" id="useIntuitive">Use intuitive directions</button>
-            <button type="button" class="btn" id="useCoded">Keep as coded</button>
+            <button type="button" class="btn primary" id="useIntuitive">W = forward</button>
+            <button type="button" class="btn" id="useCoded">Raw signs from the Java</button>
           </div>
           <p class="note" id="dirStatus" style="font-size:12.5px"></p>
         </div>
@@ -458,11 +458,11 @@ const GROUPS = [
     { k: 'rotScale', label: 'Turn rate multiplier', code: '-rotInput * Constants.MAX_SPEED', src: 'RobotContainer.java:61', def: 4, min: 0.5, max: 10, step: 0.1, unit: 'rad/s',
       help: 'The code reuses MAX_SPEED here, so full stick asks for 4 rad/s (229°/s).' },
     { k: 'deadband', label: 'Stick deadband', code: 'MathUtil.applyDeadband(…, 0.04)', src: 'RobotContainer.java:56-60', def: 0.04, min: 0, max: 0.3, step: 0.01 },
-    { k: 'fwdSign', label: 'Forward sign', code: 'xSpeed = +getRightY()', src: 'RobotContainer.java:57', def: 1, type: 'sign',
-      help: 'WPILib reports stick-forward as −1, so +1 means stick-forward drives toward −X.' },
+    { k: 'fwdSign', label: 'Forward sign', code: 'xSpeed = +getRightY()', src: 'RobotContainer.java:57', def: 1, start: -1, type: 'sign',
+      help: 'The Java uses +1, which drives toward the back (WPILib reports stick-forward as −1). The sim defaults to −1 so W drives forward.' },
     { k: 'strafeSign', label: 'Strafe sign', code: 'ySpeed = -getRightX()', src: 'RobotContainer.java:56', def: -1, type: 'sign' },
-    { k: 'rotSign', label: 'Turn sign', code: 'turnOutput = -(-getLeftX())', src: 'RobotContainer.java:60-61', def: 1, type: 'sign',
-      help: '+1 means stick-right spins counter-clockwise (WPILib positive).' },
+    { k: 'rotSign', label: 'Turn sign', code: 'turnOutput = -(-getLeftX())', src: 'RobotContainer.java:60-61', def: 1, start: -1, type: 'sign',
+      help: 'The Java uses +1, which spins left on stick-right. The sim defaults to −1 so E turns right.' },
     { k: 'fieldRel', label: 'Field-relative', code: 'drive(…, fieldRelative)', src: 'RobotContainer.java:67', def: false, type: 'bool',
       help: 'Uses the gyro heading. Press R (Start) to zero it.' },
     { k: 'inputExp', label: 'Stick curve exponent', code: 'not in code (1 = linear)', src: 'sim experiment', def: 1, min: 1, max: 3, step: 0.1, sim: true,
@@ -533,12 +533,12 @@ const GROUPS = [
 ];
 
 const P = {}, DEF = {}, META = {};
-for (const g of GROUPS) for (const p of g.params) { P[p.k] = p.def; DEF[p.k] = p.def; META[p.k] = p; }
+for (const g of GROUPS) for (const p of g.params) { P[p.k] = p.start ?? p.def; DEF[p.k] = p.def; META[p.k] = p; }
 try {
-  const saved = JSON.parse(localStorage.getItem('testbot-sim-params') || '{}');
+  const saved = JSON.parse(localStorage.getItem('testbot-sim-params-v2') || '{}');
   for (const k in saved) if (k in P && typeof saved[k] === typeof DEF[k]) P[k] = saved[k];
 } catch (e) { /* storage unavailable */ }
-const saveParams = () => { try { localStorage.setItem('testbot-sim-params', JSON.stringify(P)); } catch (e) {} };
+const saveParams = () => { try { localStorage.setItem('testbot-sim-params-v2', JSON.stringify(P)); } catch (e) {} };
 
 // =====================================================================
 // Field (REBUILT 2026, approximate)
@@ -872,8 +872,9 @@ function physicsStep(dt) {
     while (HW.feedAcc >= 1 && R.hopper > 0) { HW.feedAcc -= 1; launch(); }
   } else HW.feedAcc = Math.min(HW.feedAcc, 0.999);
 }
-// hinge: rotations -> radians from horizontal (0 rot ≈ resting on floor, 15 rot ≈ stowed upright)
-const hingeAngle = () => (HW.lift.rot * (110 / 15) - 20) / DEG;
+// hinge: rotations -> radians from horizontal (0 rot ≈ deployed, roller just above a ball; 15 rot ≈ stowed upright)
+const hingeAngle = () => (HW.lift.rot * (100 / 15) - 4) / DEG;
+const PIVOT_X = -HALF + 0.05, PIVOT_Z = 0.19, ARM = 0.4, ROLLER_R = 0.035;
 const intakeDeployed = () => HW.lift.rot < 4;
 
 function collideRobot() {
@@ -978,21 +979,27 @@ function ballStep(dt) {
     const rx = b.x - R.x, ry = b.y - R.y;
     const lx = c * rx + s * ry, ly = -s * rx + c * ry;
     if (Math.abs(ly) > HALF + 0.5 || Math.abs(lx) > HALF + 0.6) continue;
-    const inZone = deployed && lx < -HALF + 0.04 && lx > -HALF - 0.38 && Math.abs(ly) < 0.33 && b.z < 0.3;
+    // over-the-floor intake: fuel rolls under the roller, which grabs its top and pulls it in
+    const ha = hingeAngle(), rollX = PIVOT_X - ARM * Math.cos(ha), rollZ = PIVOT_Z + ARM * Math.sin(ha);
+    const inZone = deployed && rollZ - ROLLER_R < 2 * BALL_R + 0.02 && Math.abs(ly) < 0.3 && b.z < 0.3
+      && lx > rollX - BALL_R - ROLLER_R && lx < -HALF + 0.02;
     if (inZone && HW.roller.rpm > 1500 && R.hopper < P.hopperCap) {
-      b.active = false; R.hopper++; HW.roller.rpm *= 0.97; continue;
+      if (lx > rollX - 0.02) { b.active = false; R.hopper++; HW.roller.rpm *= 0.97; continue; }
+      const pull = 2.5, pvx = R.vx - R.w * ry, pvy = R.vy + R.w * rx;   // drag it under the roller toward the bumper
+      b.vx = pvx + c * pull; b.vy = pvy + s * pull;
     }
-    const xmin = deployed ? -HALF - 0.38 : -HALF;
-    const yHalf = (lx < -HALF) ? 0.33 : HALF;
-    if (lx > xmin - BALL_R && lx < HALF + BALL_R && Math.abs(ly) < yHalf + BALL_R) {
-      const pxp = HALF + BALL_R - lx, pxn = lx - (xmin - BALL_R), py = yHalf + BALL_R - Math.abs(ly);
+    if (inZone && HW.roller.rpm < -1500) {
+      const pvx = R.vx - R.w * ry, pvy = R.vy + R.w * rx;
+      b.vx = pvx - c * 3; b.vy = pvy - s * 3;
+    }
+    if (lx > -HALF - BALL_R && lx < HALF + BALL_R && Math.abs(ly) < HALF + BALL_R) {
+      const pxp = HALF + BALL_R - lx, pxn = lx - (-HALF - BALL_R), py = HALF + BALL_R - Math.abs(ly);
       let nlx = 0, nly = 0, pen;
       if (pxp <= pxn && pxp <= py) { nlx = 1; pen = pxp; } else if (pxn <= py) { nlx = -1; pen = pxn; } else { nly = Math.sign(ly) || 1; pen = py; }
       const nx = c * nlx - s * nly, ny = s * nlx + c * nly;
       b.x += nx * pen; b.y += ny * pen;
       const pvx = R.vx - R.w * ry, pvy = R.vy + R.w * rx;
       let rel = (b.vx - pvx) * nx + (b.vy - pvy) * ny;
-      if (inZone && HW.roller.rpm < -1500) rel = Math.min(rel, -3);
       if (rel < 0) { b.vx -= 1.3 * rel * nx; b.vy -= 1.3 * rel * ny; }
     }
   }
@@ -1226,9 +1233,9 @@ rbox(0.05, 0.08, 0.05, DARK, 0.4, 0, 0.42);
 const led = new THREE.Mesh(new THREE.SphereGeometry(0.014, 12, 8), new THREE.MeshBasicMaterial({ color: 0x5a2220 }));
 led.position.copy(L3(0.43, 0.025, 0.45)); robotG.add(led);
 // intake on a hinge at the back
-const pivot = new THREE.Group(); pivot.position.copy(L3(-HALF + 0.05, 0, 0.19)); robotG.add(pivot);
-for (const y of [0.3, -0.3]) { const arm = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.035, 0.02), ALU); arm.position.set(-0.21, 0, -y); arm.castShadow = true; pivot.add(arm); }
-const rollerG = new THREE.Group(); rollerG.position.set(-0.4, 0, 0); pivot.add(rollerG);
+const pivot = new THREE.Group(); pivot.position.copy(L3(PIVOT_X, 0, PIVOT_Z)); robotG.add(pivot);
+for (const y of [0.31, -0.31]) { const arm = new THREE.Mesh(new THREE.BoxGeometry(ARM + 0.02, 0.035, 0.02), ALU); arm.position.set(-ARM / 2, 0, -y); arm.castShadow = true; pivot.add(arm); }
+const rollerG = new THREE.Group(); rollerG.position.set(-ARM, 0, 0); pivot.add(rollerG);
 {
   const rl = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.6, 16), mat(0x3d9a62, { roughness: 0.9 })); rl.rotation.x = Math.PI / 2; rl.castShadow = true; rollerG.add(rl);
   for (let i = 0; i < 4; i++) { const fin = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.01, 0.58), mat(0x2e7a4c)); fin.rotation.z = i * Math.PI / 4; rollerG.add(fin); }
@@ -1612,7 +1619,7 @@ $('#copyChanges').addEventListener('click', async (e) => {
   catch (err) { const sel = getSelection(), r = document.createRange(); $('#chgList').hidden = false; r.selectNodeContents($('#chgList')); sel.removeAllRanges(); sel.addRange(r); btn.textContent = 'Selected'; }
   setTimeout(() => { btn.textContent = 'Copy'; }, 1400);
 });
-$('#resetAll').addEventListener('click', () => { for (const k in DEF) P[k] = DEF[k]; saveParams(); applyModPositions(); placeModules(); updateRings(); for (const k in P) refreshRow(k); refreshChanges(); });
+$('#resetAll').addEventListener('click', () => { for (const k in DEF) P[k] = META[k].start ?? DEF[k]; saveParams(); applyModPositions(); placeModules(); updateRings(); for (const k in P) refreshRow(k); refreshChanges(); });
 buildTune(); refreshChanges();
 
 // sim controls
@@ -1637,12 +1644,12 @@ $('#helpClose').addEventListener('click', closeHelp);
 helpEl.addEventListener('click', (e) => { if (e.target === helpEl) closeHelp(); });
 function refreshDirStatus() {
   const intuitive = P.fwdSign === -1 && P.rotSign === -1;
-  const coded = P.fwdSign === DEF.fwdSign && P.rotSign === DEF.rotSign;
-  $('#dirStatus').textContent = intuitive ? 'Now using intuitive directions: W drives toward the amber arrow, E turns right. The Tune panel lists this as a change from the code.'
-    : coded ? 'Now using the directions exactly as coded.' : 'Custom signs are set in the Tune panel.';
+  const coded = P.fwdSign === 1 && P.rotSign === 1;
+  $('#dirStatus').textContent = intuitive ? 'Using W = forward (toward the amber arrow), E = turn right.'
+    : coded ? 'Using the raw Java signs: W drives toward the back, E turns left.' : 'Custom signs are set in the Tune panel.';
 }
 $('#useIntuitive').addEventListener('click', () => { setParam('fwdSign', -1); setParam('rotSign', -1); refreshDirStatus(); });
-$('#useCoded').addEventListener('click', () => { setParam('fwdSign', DEF.fwdSign); setParam('rotSign', DEF.rotSign); refreshDirStatus(); });
+$('#useCoded').addEventListener('click', () => { setParam('fwdSign', 1); setParam('rotSign', 1); refreshDirStatus(); });
 let welcomed = false; try { welcomed = localStorage.getItem('testbot-sim-welcomed') === '1'; } catch (e) {}
 if (!welcomed && location.hash !== '#play') openHelp();
 
