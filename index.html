@@ -1,0 +1,1678 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>TestBot Drive Sim</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Semi+Condensed:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: full-bleed 3D field on the left with a HUD overlay, a driver-station tuning rail on the right; stacks on phones.
+   Deliberately single-theme (dark), like a pit display. */
+:root {
+  --bg: #11151b;
+  --panel: #171c24;
+  --panel-2: #1e2530;
+  --line: #2a3340;
+  --fg: #e5e8ec;
+  --muted: #8a95a3;
+  --accent: #f0a42e;      /* safety amber */
+  --accent-ink: #1a1206;
+  --blue: #3a78e0;
+  --red: #d9473c;
+  --good: #46c083;
+  --warn: #e7b23f;
+  --bad: #e6574e;
+  --glass: rgba(17, 21, 27, 0.78);
+  --f-display: "Barlow Semi Condensed", "Arial Narrow", "Helvetica Neue", sans-serif;
+  --f-body: "Barlow", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { height: 100%; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.45 var(--f-body); overflow: hidden; }
+button { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.app { display: grid; grid-template-columns: minmax(0, 1fr) 390px; height: 100%; }
+.stage { position: relative; min-width: 0; overflow: hidden; background: #0c0f13; }
+.stage canvas.gl { display: block; width: 100%; height: 100%; touch-action: none; cursor: grab; }
+.stage canvas.gl:active { cursor: grabbing; }
+
+/* ---------- HUD ---------- */
+.hud { position: absolute; pointer-events: none; display: flex; gap: 8px; }
+.hud > * { pointer-events: auto; }
+.glass { background: var(--glass); border: 1px solid var(--line); border-radius: 6px; backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
+.hud-tl { top: 12px; left: 12px; flex-direction: column; align-items: flex-start; max-width: min(460px, 60%); }
+.hud-tr { top: 12px; right: 12px; }
+.hud-bl { bottom: 12px; left: 12px; align-items: flex-end; }
+.hud-br { bottom: 12px; right: 12px; align-items: flex-end; flex-direction: column; }
+
+.chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 9px; font: 600 12px/1.2 var(--f-display); letter-spacing: .06em; text-transform: uppercase; border-radius: 4px; }
+.chip.mode { background: var(--accent); color: var(--accent-ink); }
+.chip.mode.field { background: var(--blue); color: #fff; }
+.cmds { padding: 7px 10px; font: 12px/1.5 var(--f-mono); min-width: 220px; }
+.cmds .k { color: var(--muted); font: 600 11px var(--f-display); letter-spacing: .08em; text-transform: uppercase; display: block; margin-bottom: 2px; }
+.cmds div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cmds .def { color: var(--muted); }
+.warns { display: flex; flex-direction: column; gap: 4px; }
+.warn { padding: 5px 9px; font-size: 12.5px; line-height: 1.35; border-left: 3px solid var(--warn); background: var(--glass); border-radius: 0 4px 4px 0; max-width: 420px; }
+.warn.bad { border-left-color: var(--bad); }
+
+.score { display: grid; grid-template-columns: repeat(5, auto); gap: 2px 18px; padding: 8px 12px; }
+.score .lbl { font: 600 10.5px var(--f-display); letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+.score .val { font: 500 20px/1.1 var(--f-mono); font-variant-numeric: tabular-nums; }
+.score .val small { font-size: 12px; color: var(--muted); }
+
+.pad { padding: 6px 8px 4px; }
+.pad .t { display: flex; justify-content: space-between; gap: 8px; font: 600 10.5px var(--f-display); letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+.pad .t b { color: var(--fg); font-weight: 600; }
+.pad canvas { display: block; width: 150px; height: 74px; }
+
+.cambar { display: flex; padding: 3px; gap: 2px; }
+.cambar button { background: none; border: 0; padding: 5px 9px; border-radius: 4px; font: 600 12px var(--f-display); letter-spacing: .05em; text-transform: uppercase; color: var(--muted); cursor: pointer; }
+.cambar button:hover { color: var(--fg); }
+.cambar button[aria-pressed="true"] { background: var(--panel-2); color: var(--fg); }
+.cambar .sep { width: 1px; background: var(--line); margin: 4px 3px; }
+
+/* keycaps */
+kbd, .key { display: inline-grid; place-items: center; min-width: 22px; height: 22px; padding: 0 5px; font: 500 11.5px/1 var(--f-mono); color: var(--fg); background: var(--panel-2); border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; white-space: nowrap; }
+.key.down { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+
+/* always-on key legend (bottom-left, above the controller widgets) */
+.hud-bl { flex-direction: column; align-items: flex-start; }
+.hud-bl .pads { display: flex; gap: 8px; }
+.legend-keys { padding: 8px 10px; display: grid; grid-template-columns: auto auto; gap: 5px 10px; align-items: center; font-size: 12.5px; }
+.legend-keys .ks { display: flex; gap: 3px; justify-content: flex-end; }
+.legend-keys .head { grid-column: 1 / -1; display: flex; justify-content: space-between; align-items: center; gap: 12px; font: 600 10.5px var(--f-display); letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+.legend-keys .head button { background: none; border: 0; color: var(--accent); font: 600 11px var(--f-display); letter-spacing: .08em; text-transform: uppercase; cursor: pointer; padding: 0; }
+.score .val.in { color: var(--good); }
+
+/* help dialog */
+.modal { position: fixed; inset: 0; z-index: 20; display: flex; padding: 16px; background: rgba(6, 8, 11, 0.62); backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px); overflow-y: auto; }
+.sheet { margin: auto; width: min(880px, 100%); background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 22px 24px 20px; display: flex; flex-direction: column; gap: 16px; box-shadow: 0 30px 80px rgba(0,0,0,.45); }
+.sheet h2 { margin: 0; font: 700 28px/1.05 var(--f-display); text-wrap: balance; }
+.sheet .lede { margin: 4px 0 0; color: var(--muted); max-width: 70ch; font-size: 15px; }
+.sheet .lede b { color: var(--fg); font-weight: 600; }
+.sheet h3 { margin: 0 0 8px; font: 600 12px var(--f-display); letter-spacing: .12em; text-transform: uppercase; color: var(--accent); }
+.howto { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 0; padding: 0; list-style: none; counter-reset: step; }
+.howto li { counter-increment: step; background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; font-size: 13.5px; }
+.howto li::before { content: counter(step); display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: var(--accent); color: var(--accent-ink); font: 700 13px var(--f-display); margin-bottom: 6px; }
+.howto li > b:first-child { display: block; font: 600 15px var(--f-display); margin-bottom: 2px; }
+.keymap { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 20px; }
+.kb-diagram { display: flex; gap: 18px; align-items: flex-start; flex-wrap: wrap; margin-bottom: 10px; }
+.cluster { display: grid; grid-template-columns: repeat(3, 40px); gap: 4px; }
+.cluster .key { height: 38px; font-size: 14px; flex-direction: column; }
+.cluster .key small { font: 500 9px var(--f-display); letter-spacing: .04em; text-transform: uppercase; color: var(--muted); margin-top: 1px; }
+.cluster .blank { visibility: hidden; }
+.cluster-cap { font-size: 12px; color: var(--muted); margin-top: 6px; text-align: center; }
+.binds { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+.binds td { padding: 5px 0; border-bottom: 1px solid var(--line); vertical-align: middle; }
+.binds td:first-child { white-space: nowrap; padding-right: 12px; width: 1%; }
+.binds tr.grp-row td { border-bottom: 0; padding-top: 10px; font: 600 11px var(--f-display); letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+.binds .gp { color: var(--muted); font: 11.5px var(--f-mono); }
+.dir-note { display: flex; flex-direction: column; gap: 10px; background: var(--panel-2); border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--line)); border-radius: 8px; padding: 12px 14px; font-size: 13.5px; }
+.dir-note p { margin: 0; }
+.sheet-foot { position: sticky; bottom: -21px; margin: 0 -24px -20px; padding: 12px 24px 16px; background: var(--panel); border-top: 1px solid var(--line); border-radius: 0 0 10px 10px; display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+.sheet-foot .note { font-size: 12.5px; }
+.btn.big { padding: 9px 16px; font-size: 14px; }
+@media (max-width: 760px) {
+  .howto { grid-template-columns: 1fr; }
+  .keymap { grid-template-columns: 1fr; }
+  .sheet { padding: 18px 16px; }
+}
+.loading { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); font: 500 14px var(--f-mono); }
+
+/* ---------- Rail ---------- */
+.rail { display: flex; flex-direction: column; min-height: 0; background: var(--panel); border-left: 1px solid var(--line); }
+.rail header { padding: 16px 16px 0; }
+.eyebrow { font: 600 11px var(--f-display); letter-spacing: .14em; text-transform: uppercase; color: var(--accent); }
+.rail h1 { margin: 2px 0 2px; font: 700 26px/1.05 var(--f-display); letter-spacing: .01em; text-wrap: balance; }
+.rail .sub { margin: 0; color: var(--muted); font-size: 13px; }
+.rail .sub code { font: 12px var(--f-mono); color: var(--fg); }
+.tabs { display: flex; gap: 2px; margin-top: 12px; padding: 0 16px; border-bottom: 1px solid var(--line); }
+.tabs button { background: none; border: 0; border-bottom: 2px solid transparent; padding: 8px 10px; margin-bottom: -1px; font: 600 13px var(--f-display); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); cursor: pointer; }
+.tabs button[aria-selected="true"] { color: var(--fg); border-bottom-color: var(--accent); }
+.tabs .count { display: inline-block; min-width: 18px; padding: 0 5px; margin-left: 4px; border-radius: 9px; background: var(--accent); color: var(--accent-ink); font: 600 11px/16px var(--f-mono); text-align: center; }
+.panes { flex: 1; min-height: 0; overflow-y: auto; }
+.pane { padding: 12px 16px 24px; display: flex; flex-direction: column; gap: 10px; }
+
+.grp { border: 1px solid var(--line); border-radius: 6px; background: var(--panel-2); }
+.grp > summary { list-style: none; cursor: pointer; display: flex; align-items: baseline; justify-content: space-between; gap: 8px; padding: 9px 12px; }
+.grp > summary::-webkit-details-marker { display: none; }
+.grp > summary .g-name { font: 600 15px var(--f-display); letter-spacing: .03em; }
+.grp > summary .g-name::before { content: "▸"; display: inline-block; width: 14px; color: var(--muted); transition: transform .15s; }
+.grp[open] > summary .g-name::before { transform: rotate(90deg); }
+.grp > summary .g-file { font: 11px var(--f-mono); color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.g-note { margin: 0 12px 6px; font-size: 12.5px; color: var(--muted); }
+.g-body { display: flex; flex-direction: column; padding: 0 0 6px; }
+
+.prm { padding: 8px 12px; border-top: 1px solid var(--line); display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 10px; align-items: center; }
+.prm .lab { display: flex; flex-direction: column; min-width: 0; }
+.prm label { font-weight: 600; font-size: 13.5px; display: flex; align-items: center; gap: 6px; }
+.prm label .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); display: none; }
+.prm.mod label .dot { display: inline-block; }
+.prm .code { font: 11.5px var(--f-mono); color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.prm .code .src { color: color-mix(in srgb, var(--muted) 70%, var(--bg)); }
+.prm .num { display: flex; align-items: center; gap: 4px; }
+.prm input[type="number"] { width: 78px; padding: 4px 6px; background: var(--bg); border: 1px solid var(--line); border-radius: 4px; color: var(--fg); font: 13px var(--f-mono); text-align: right; font-variant-numeric: tabular-nums; }
+.prm.mod input[type="number"] { border-color: color-mix(in srgb, var(--accent) 60%, var(--line)); color: var(--accent); }
+.prm .unit { font: 11px var(--f-mono); color: var(--muted); min-width: 28px; }
+.prm .rst { background: none; border: 0; color: var(--muted); cursor: pointer; padding: 2px 4px; font-size: 14px; visibility: hidden; }
+.prm.mod .rst { visibility: visible; }
+.prm .rst:hover { color: var(--accent); }
+.prm .full { grid-column: 1 / -1; }
+.prm .help { margin: 0; font-size: 12.5px; color: var(--muted); }
+.prm input[type="range"] { width: 100%; accent-color: var(--accent); margin: 2px 0; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 4px; overflow: hidden; }
+.seg button { background: var(--bg); border: 0; padding: 4px 10px; font: 12.5px var(--f-mono); color: var(--muted); cursor: pointer; }
+.seg button + button { border-left: 1px solid var(--line); }
+.seg button[aria-pressed="true"] { background: var(--panel); color: var(--fg); box-shadow: inset 0 -2px 0 var(--accent); }
+
+.changes { border-top: 1px solid var(--line); padding: 10px 16px 14px; background: var(--panel); display: flex; flex-direction: column; gap: 8px; }
+.changes .row { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.changes h2 { margin: 0; font: 600 13px var(--f-display); letter-spacing: .1em; text-transform: uppercase; }
+.changes pre { margin: 0; max-height: 110px; overflow: auto; font: 11.5px/1.5 var(--f-mono); color: var(--fg); white-space: pre; background: var(--bg); border: 1px solid var(--line); border-radius: 4px; padding: 6px 8px; }
+.changes .empty { margin: 0; font-size: 12.5px; color: var(--muted); }
+.btn { background: var(--panel-2); border: 1px solid var(--line); border-radius: 4px; padding: 5px 10px; font: 600 12px var(--f-display); letter-spacing: .06em; text-transform: uppercase; cursor: pointer; }
+.btn:hover { border-color: var(--muted); }
+.btn.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.btns { display: flex; gap: 6px; flex-wrap: wrap; }
+
+/* telemetry */
+.sec-h { margin: 6px 0 0; font: 600 12px var(--f-display); letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+.kv { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.kv > div { padding: 5px 10px; border-top: 1px solid var(--line); font-size: 13px; }
+.kv > div:nth-child(-n+2) { border-top: 0; }
+.kv .v { font: 13px var(--f-mono); text-align: right; font-variant-numeric: tabular-nums; }
+.kv .v.on { color: var(--good); }
+.kv .v.off { color: var(--muted); }
+.chartbox { border: 1px solid var(--line); border-radius: 6px; padding: 8px; background: var(--panel-2); }
+.chartbox canvas { display: block; width: 100%; height: 220px; }
+.legend { display: flex; gap: 14px; font-size: 12px; color: var(--muted); margin-top: 4px; flex-wrap: wrap; }
+.legend i { display: inline-block; width: 14px; height: 2px; vertical-align: middle; margin-right: 5px; background: var(--fg); }
+.legend i.cmd { background: var(--accent); }
+.tbl { width: 100%; border-collapse: collapse; font: 12.5px var(--f-mono); font-variant-numeric: tabular-nums; }
+.tbl th { text-align: right; font: 600 11px var(--f-display); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); padding: 4px 6px; border-bottom: 1px solid var(--line); }
+.tbl td { text-align: right; padding: 4px 6px; border-bottom: 1px solid var(--line); }
+.tbl th:first-child, .tbl td:first-child { text-align: left; }
+.tbl .slip { color: var(--bad); }
+.tblwrap { overflow-x: auto; }
+
+/* controls */
+.map { width: 100%; border-collapse: collapse; font-size: 13px; }
+.map td { padding: 5px 4px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.map td:first-child { white-space: nowrap; padding-right: 10px; }
+.map kbd { font: 500 11.5px var(--f-mono); padding: 1px 5px; border: 1px solid var(--line); border-radius: 3px; background: var(--bg); white-space: nowrap; }
+.map .gp { color: var(--muted); font: 11.5px var(--f-mono); }
+.note { margin: 0; font-size: 13px; color: var(--muted); max-width: 65ch; }
+.note b { color: var(--fg); }
+
+@media (max-width: 900px) {
+  body { overflow: auto; }
+  .app { grid-template-columns: 1fr; height: auto; }
+  .stage { height: 64vh; min-height: 360px; }
+  .rail { border-left: 0; border-top: 1px solid var(--line); }
+  .panes { overflow: visible; }
+  .hud-bl .pads, .legend-keys { display: none; }
+  .score { grid-template-columns: repeat(3, auto); }
+  .hud-tl { max-width: 55%; }
+  .cmds { min-width: 0; }
+}
+@media (max-width: 520px) {
+  .hud-bl { display: none; }
+  .warns { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .grp > summary .g-name::before { transition: none; }
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <main class="stage" id="stage">
+    <div class="loading" id="loading">Loading Three.js…</div>
+
+    <div class="hud hud-tl">
+      <span class="chip mode" id="modeChip">Robot-relative</span>
+      <div class="glass cmds" id="cmds"><span class="k">Running commands</span></div>
+      <div class="warns" id="warns"></div>
+    </div>
+
+    <div class="hud hud-tr">
+      <div class="glass score">
+        <span class="lbl">Scored</span><span class="lbl">Hopper</span><span class="lbl" title="Distance from robot center to the nearest hub. Green when a shot from here should go in.">To hub</span><span class="lbl">Speed</span><span class="lbl">Heading</span>
+        <span class="val" id="sScore">0</span>
+        <span class="val" id="sHopper">8</span>
+        <span class="val" id="sHub">—</span>
+        <span class="val" id="sSpeed">0.00<small> m/s</small></span>
+        <span class="val" id="sHead">0°</span>
+      </div>
+    </div>
+
+    <div class="hud hud-bl">
+      <div class="glass legend-keys" id="legendKeys">
+        <div class="head"><span>Keys</span><button type="button" data-help>All controls (H)</button></div>
+        <span class="ks"><span class="key" data-k="KeyW">W</span><span class="key" data-k="KeyA">A</span><span class="key" data-k="KeyS">S</span><span class="key" data-k="KeyD">D</span></span><span>Drive</span>
+        <span class="ks"><span class="key" data-k="KeyQ">Q</span><span class="key" data-k="KeyE">E</span></span><span>Turn</span>
+        <span class="ks"><span class="key" data-k="Space">Space</span></span><span>Shoot (hold)</span>
+        <span class="ks"><span class="key" data-k="Digit2">2</span></span><span>Intake rollers on/off</span>
+        <span class="ks"><span class="key" data-k="Digit1">1</span></span><span>Raise / lower intake</span>
+        <span class="ks"><span class="key" data-k="KeyF">F</span></span><span>Auto-aim + shoot (hold)</span>
+        <span class="ks"><span class="key" data-k="KeyC">C</span></span><span>Change camera</span>
+      </div>
+      <div class="pads">
+        <div class="glass pad"><div class="t"><span>Driver · port 0</span><b id="padSrc0">Keyboard</b></div><canvas id="pad0" width="300" height="148"></canvas></div>
+        <div class="glass pad"><div class="t"><span>Operator · port 1</span><b id="padSrc1">Keyboard</b></div><canvas id="pad1" width="300" height="148"></canvas></div>
+      </div>
+    </div>
+
+    <div class="hud hud-br">
+      <div class="glass cambar" role="group" aria-label="Camera">
+        <button data-cam="chase" aria-pressed="true">Chase</button>
+        <button data-cam="driver" aria-pressed="false">Driver</button>
+        <button data-cam="orbit" aria-pressed="false">Orbit</button>
+        <button data-cam="top" aria-pressed="false">Overview</button>
+      </div>
+      <div class="glass cambar" role="group" aria-label="Simulation">
+        <button type="button" data-help>Controls</button>
+        <span class="sep"></span>
+        <button id="slowBtn" aria-pressed="false" title="Run the simulation at quarter speed">¼× speed</button>
+        <button id="pauseBtn" aria-pressed="false">Pause</button>
+        <span class="sep"></span>
+        <button id="resetRobot">Reset robot</button>
+        <button id="resetField">Reset field</button>
+      </div>
+    </div>
+
+  </main>
+
+  <aside class="rail">
+    <header>
+      <div class="eyebrow">Bionic Beef · 2026 TestBot</div>
+      <h1>TestBot Drive Sim</h1>
+      <p class="sub">Runs the same drive, shooter, intake and vision logic as <code>main @ 94fb4fb</code>, with your swerve JSON. Change a value below and drive to feel the difference.</p>
+    </header>
+    <nav class="tabs" role="tablist">
+      <button role="tab" aria-selected="true" data-tab="tune" id="tab-tune">Tune<span class="count" id="chgCount" hidden>0</span></button>
+      <button role="tab" aria-selected="false" data-tab="telem" id="tab-telem">Telemetry</button>
+      <button role="tab" aria-selected="false" data-tab="ctl" id="tab-ctl">Controls</button>
+    </nav>
+    <div class="panes">
+      <section class="pane" id="pane-tune" role="tabpanel"></section>
+
+      <section class="pane" id="pane-telem" role="tabpanel" hidden>
+        <h2 class="sec-h">Drive response</h2>
+        <div class="chartbox">
+          <canvas id="chart"></canvas>
+          <div class="legend"><span><i class="cmd"></i>Commanded</span><span><i></i>Actual</span></div>
+        </div>
+        <h2 class="sec-h">Swerve modules</h2>
+        <div class="tblwrap"><table class="tbl" id="modTbl">
+          <thead><tr><th>Module</th><th>Target°</th><th>Angle°</th><th>Target m/s</th><th>Wheel m/s</th><th>Amps</th></tr></thead>
+          <tbody></tbody>
+        </table></div>
+        <h2 class="sec-h">SmartDashboard</h2>
+        <div class="kv" id="sd"></div>
+      </section>
+
+      <section class="pane" id="pane-ctl" role="tabpanel" hidden>
+        <p class="note">Bindings mirror <b>RobotContainer.configureBindings()</b>. Plug in one Xbox-style controller and it acts as both; plug in two and the second becomes the operator.</p>
+        <h2 class="sec-h">Driver · port 0</h2>
+        <table class="map"><tbody>
+          <tr><td><kbd>W</kbd> <kbd>S</kbd></td><td>Right stick Y: translate forward / back <span class="gp">· right stick</span></td></tr>
+          <tr><td><kbd>A</kbd> <kbd>D</kbd></td><td>Right stick X: strafe left / right</td></tr>
+          <tr><td><kbd>Q</kbd> <kbd>E</kbd> or <kbd>←</kbd> <kbd>→</kbd></td><td>Left stick X: rotate <span class="gp">· left stick</span></td></tr>
+          <tr><td><kbd>Space</kbd></td><td>Right trigger (hold): <code>runFullShooter_np</code> <span class="gp">· RT</span></td></tr>
+          <tr><td><kbd>Shift</kbd></td><td>Left trigger (hold): <code>indexBackwards</code> <span class="gp">· LT</span></td></tr>
+        </tbody></table>
+        <h2 class="sec-h">Operator · port 1</h2>
+        <table class="map"><tbody>
+          <tr><td><kbd>R</kbd></td><td>Start: zero gyro <span class="gp">· Start</span></td></tr>
+          <tr><td><kbd>1</kbd></td><td>A: toggle intake hinge up / down <span class="gp">· A</span></td></tr>
+          <tr><td><kbd>2</kbd></td><td>B: toggle rollers in <span class="gp">· B</span></td></tr>
+          <tr><td><kbd>3</kbd></td><td>X: toggle rollers out <span class="gp">· X</span></td></tr>
+          <tr><td><kbd>]</kbd></td><td>Right bumper (hold): <code>runIntakeUp</code> <span class="gp">· RB</span></td></tr>
+          <tr><td><kbd>[</kbd></td><td>Left bumper (hold): <code>runIntakeDown</code> <span class="gp">· LB</span></td></tr>
+        </tbody></table>
+        <h2 class="sec-h">Sim-only extras</h2>
+        <table class="map"><tbody>
+          <tr><td><kbd>F</kbd></td><td>Hold to run the auto <code>"shoot"</code> named command (<code>turnshoot</code>: vision turn + auto shooter + hinge wiggle) <span class="gp">· Y</span></td></tr>
+          <tr><td><kbd>G</kbd></td><td>Run <code>"stop_shooter"</code>. Releasing <kbd>F</kbd> leaves the shooter running, just like the real command. <span class="gp">· Back</span></td></tr>
+          <tr><td><kbd>C</kbd></td><td>Cycle camera. Drag to look around, scroll to zoom, double-click to recenter.</td></tr>
+        </tbody></table>
+        <p class="note">Physics is a model: NEO motor curves, Spark ramp rates and current limits, friction-limited wheels, and the 20&nbsp;ms robot loop. Field layout follows REBUILT roughly; robot mechanism placement is a guess.</p>
+      </section>
+    </div>
+    <div class="changes">
+      <div class="row"><h2>Changed from code</h2>
+        <div class="btns"><button class="btn" id="copyChanges">Copy</button><button class="btn" id="resetAll">Reset all</button></div>
+      </div>
+      <p class="empty" id="chgEmpty">Every value matches the robot code.</p>
+      <pre id="chgList" hidden></pre>
+    </div>
+  </aside>
+</div>
+
+<div class="modal" id="help" role="dialog" aria-modal="true" aria-labelledby="helpTitle" hidden>
+  <div class="sheet">
+    <div>
+      <div class="eyebrow">Bionic Beef · 2026 TestBot</div>
+      <h2 id="helpTitle">How to drive the TestBot</h2>
+      <p class="lede">This robot runs the <b>team's real drive, shooter and intake code</b>. Pick up the yellow fuel, drive into the <b>green ring</b> around the blue hub, and shoot. Change any constant in the <b>Tune</b> panel on the right to feel what it does.</p>
+    </div>
+
+    <ol class="howto">
+      <li><b>Shoot right away</b>You start with 8 fuel, already inside the green ring and facing the hub. Hold <kbd>Space</kbd>. The shooter spins up for 1&nbsp;second, then feeds.</li>
+      <li><b>Collect more fuel</b>The intake is on the <b>back</b> of the robot, opposite the amber arrow. Press <kbd>2</kbd> to start the rollers, then back into the yellow balls in the middle of the field.</li>
+      <li><b>Score again</b>Drive back into the green ring, face the hub, and hold <kbd>Space</kbd>. Or hold <kbd>F</kbd> and the camera will aim the robot for you.</li>
+    </ol>
+
+    <div class="keymap">
+      <div>
+        <h3>Keyboard</h3>
+        <div class="kb-diagram">
+          <div>
+            <div class="cluster">
+              <span class="key">Q<small>turn</small></span><span class="key">W<small>stick ↑</small></span><span class="key">E<small>turn</small></span>
+              <span class="key">A<small>left</small></span><span class="key">S<small>stick ↓</small></span><span class="key">D<small>right</small></span>
+            </div>
+            <div class="cluster-cap">Drive (strafes too) · Q/E turn</div>
+          </div>
+          <div>
+            <div class="cluster">
+              <span class="key">1<small>hinge</small></span><span class="key">2<small>in</small></span><span class="key">3<small>out</small></span>
+            </div>
+            <div class="cluster-cap">Intake</div>
+          </div>
+        </div>
+        <table class="binds"><tbody>
+          <tr class="grp-row"><td colspan="2">Driver</td></tr>
+          <tr><td><kbd>Space</kbd></td><td>Hold to shoot (right trigger)</td></tr>
+          <tr><td><kbd>Shift</kbd></td><td>Hold to run the indexer backwards and unjam (left trigger)</td></tr>
+          <tr class="grp-row"><td colspan="2">Operator</td></tr>
+          <tr><td><kbd>1</kbd></td><td>Raise or lower the intake (A)</td></tr>
+          <tr><td><kbd>2</kbd> / <kbd>3</kbd></td><td>Turn rollers on, pulling in / pushing out (B / X)</td></tr>
+          <tr><td><kbd>[</kbd> <kbd>]</kbd></td><td>Hold to nudge the intake hinge down / up (LB / RB)</td></tr>
+          <tr><td><kbd>R</kbd></td><td>Zero the gyro (Start). Only matters in field-relative mode.</td></tr>
+          <tr class="grp-row"><td colspan="2">Extras</td></tr>
+          <tr><td><kbd>F</kbd> / <kbd>G</kbd></td><td>Hold to run the auto "shoot" command / stop the shooter</td></tr>
+          <tr><td><kbd>C</kbd> <kbd>H</kbd></td><td>Change camera / open this help. Drag the view to look around, scroll to zoom.</td></tr>
+        </tbody></table>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:14px;min-width:0">
+        <div>
+          <h3>Xbox controller</h3>
+          <table class="binds"><tbody>
+            <tr><td>Right stick</td><td>Move</td></tr>
+            <tr><td>Left stick ↔</td><td>Rotate</td></tr>
+            <tr><td>RT / LT</td><td>Shoot / reverse indexer</td></tr>
+            <tr><td>A · B · X</td><td>Intake hinge · rollers in · rollers out</td></tr>
+            <tr><td>LB / RB</td><td>Nudge hinge down / up</td></tr>
+            <tr><td>Start</td><td>Zero gyro</td></tr>
+            <tr><td>Y / Back</td><td>Auto-aim + shoot / stop shooter</td></tr>
+          </tbody></table>
+          <p class="note" style="margin-top:6px">One controller does everything. With a second controller plugged in, it becomes the operator. Press any button so the browser detects it.</p>
+        </div>
+        <div class="dir-note">
+          <p><b>Heads up:</b> the code drives toward the robot's <b>back</b> when you push the stick forward, and spins left when you push the turn stick right. That is what the Java says. The real robot's wheel setup may cancel it out.</p>
+          <div class="btns">
+            <button type="button" class="btn primary" id="useIntuitive">Use intuitive directions</button>
+            <button type="button" class="btn" id="useCoded">Keep as coded</button>
+          </div>
+          <p class="note" id="dirStatus" style="font-size:12.5px"></p>
+        </div>
+      </div>
+    </div>
+
+    <div class="sheet-foot">
+      <p class="note">Press <kbd>H</kbd> or the Controls button any time to see this again.</p>
+      <button type="button" class="btn primary big" id="helpClose">Start driving</button>
+    </div>
+  </div>
+</div>
+
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" } }
+</script>
+<script type="module">
+import * as THREE from 'three';
+
+const $ = (s) => document.querySelector(s);
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+const wrapRad = (a) => Math.atan2(Math.sin(a), Math.cos(a));
+const DEG = 180 / Math.PI;
+const IN = 0.0254;
+
+// =====================================================================
+// Parameters. "code" params mirror values in the repo; "sim" params are
+// physical guesses the code doesn't define.
+// =====================================================================
+const GROUPS = [
+  { id: 'drive', name: 'Drive command', file: 'RobotContainer.java', open: true, params: [
+    { k: 'maxSpeed', label: 'Max speed', code: 'Constants.MAX_SPEED', src: 'Constants.java:12', def: 4, min: 1, max: 6, step: 0.1, unit: 'm/s',
+      help: 'Scales stick translation. YAGSL also uses it to desaturate wheel speeds and as the drive feedforward (duty = speed ÷ MAX_SPEED).' },
+    { k: 'rotScale', label: 'Turn rate multiplier', code: '-rotInput * Constants.MAX_SPEED', src: 'RobotContainer.java:61', def: 4, min: 0.5, max: 10, step: 0.1, unit: 'rad/s',
+      help: 'The code reuses MAX_SPEED here, so full stick asks for 4 rad/s (229°/s).' },
+    { k: 'deadband', label: 'Stick deadband', code: 'MathUtil.applyDeadband(…, 0.04)', src: 'RobotContainer.java:56-60', def: 0.04, min: 0, max: 0.3, step: 0.01 },
+    { k: 'fwdSign', label: 'Forward sign', code: 'xSpeed = +getRightY()', src: 'RobotContainer.java:57', def: 1, type: 'sign',
+      help: 'WPILib reports stick-forward as −1, so +1 means stick-forward drives toward −X.' },
+    { k: 'strafeSign', label: 'Strafe sign', code: 'ySpeed = -getRightX()', src: 'RobotContainer.java:56', def: -1, type: 'sign' },
+    { k: 'rotSign', label: 'Turn sign', code: 'turnOutput = -(-getLeftX())', src: 'RobotContainer.java:60-61', def: 1, type: 'sign',
+      help: '+1 means stick-right spins counter-clockwise (WPILib positive).' },
+    { k: 'fieldRel', label: 'Field-relative', code: 'drive(…, fieldRelative)', src: 'RobotContainer.java:67', def: false, type: 'bool',
+      help: 'Uses the gyro heading. Press R (Start) to zero it.' },
+    { k: 'inputExp', label: 'Stick curve exponent', code: 'not in code (1 = linear)', src: 'sim experiment', def: 1, min: 1, max: 3, step: 0.1, sim: true,
+      help: 'Try 2 for finer control at low speed. Applied after the deadband.' },
+  ]},
+  { id: 'swerve', name: 'Swerve config', file: 'deploy/swerve/*', params: [
+    { k: 'configDir', label: 'Config folder', code: 'swerveConfigDirectory', src: 'Constants.java:17', def: 'comp', type: 'select', options: ['comp', 'test'],
+      help: 'comp puts modules at ±13.5 in; test at ±13 × ±11 in.' },
+    { k: 'driveRamp', label: 'Drive ramp rate', code: 'rampRate.drive', src: 'physicalproperties.json', def: 0.25, min: 0, max: 1, step: 0.01, unit: 's',
+      help: 'Time for the Spark output to go from 0 to full. Larger is smoother but laggier.' },
+    { k: 'angleRamp', label: 'Angle ramp rate', code: 'rampRate.angle', src: 'physicalproperties.json', def: 0.25, min: 0, max: 1, step: 0.01, unit: 's',
+      help: 'Also applies to the steering motors, which slows module turning. Watch the amber target ticks.' },
+    { k: 'driveCurrent', label: 'Drive current limit', code: 'currentLimit.drive', src: 'physicalproperties.json', def: 40, min: 10, max: 80, step: 1, unit: 'A' },
+    { k: 'cof', label: 'Wheel grip (COF)', code: 'wheelGripCoefficientOfFriction', src: 'physicalproperties.json', def: 1.19, min: 0.3, max: 2, step: 0.01 },
+    { k: 'driveGear', label: 'Drive gear ratio', code: 'conversionFactors.drive.gearRatio', src: 'physicalproperties.json', def: 6.75, min: 4, max: 10, step: 0.05 },
+    { k: 'wheelDiam', label: 'Wheel diameter', code: 'conversionFactors.drive.diameter', src: 'physicalproperties.json', def: 4, min: 3, max: 6, step: 0.1, unit: 'in' },
+    { k: 'angleGear', label: 'Angle gear ratio', code: 'conversionFactors.angle.gearRatio', src: 'physicalproperties.json', def: 21.4285714286, min: 8, max: 40, step: 0.1 },
+    { k: 'angleP', label: 'Angle kP', code: 'angle.p', src: 'pidfproperties.json', def: 0.01, min: 0.001, max: 0.06, step: 0.001 },
+    { k: 'angleD', label: 'Angle kD', code: 'angle.d', src: 'pidfproperties.json', def: 0.0001, min: 0, max: 0.01, step: 0.0001 },
+    { k: 'driveP', label: 'Drive kP', code: 'drive.p', src: 'pidfproperties.json', def: 0.0020605, min: 0, max: 0.2, step: 0.0005 },
+  ]},
+  { id: 'shooter', name: 'Shooter', file: 'ShootingSubsystem.java', params: [
+    { k: 'shooterDuty', label: 'Teleop shooter output', code: 'shooterMotor.set(200)', src: 'ShootingSubsystem.java:139', def: 1, min: -1, max: 1, step: 0.05,
+      help: 'set() takes −1…1, so 200 is clamped to full power. The 4000 branch is never used: its while() is checked once at startup, before a tag is seen.' },
+    { k: 'spinUp', label: 'Spin-up time', code: '.withTimeout(1.0)', src: 'ShootingSubsystem.java:145', def: 1, min: 0, max: 3, step: 0.05, unit: 's' },
+    { k: 'indexOn', label: 'Indexer “on” output', code: 'indexerMotor.set(-0.5)', src: 'ShootingSubsystem.java:151', def: -0.5, min: -1, max: 1, step: 0.05 },
+    { k: 'onTime', label: '“On” phase', code: '.withTimeout(0.3)', src: 'ShootingSubsystem.java:152', def: 0.3, min: 0.02, max: 1, step: 0.02, unit: 's' },
+    { k: 'indexOff', label: 'Indexer “off” output', code: 'indexerMotor.set(-0.5)', src: 'ShootingSubsystem.java:156', def: -0.5, min: -1, max: 1, step: 0.05,
+      help: 'The OFF phase also sets −0.5, so the indexer never pauses. Set this to 0 to get the pulsing the comments describe.' },
+    { k: 'offTime', label: '“Off” phase', code: '.withTimeout(0.1)', src: 'ShootingSubsystem.java:157', def: 0.1, min: 0.02, max: 1, step: 0.02, unit: 's' },
+    { k: 'indexBack', label: 'Index backwards output', code: 'indexerMotor.set(0.7)', src: 'ShootingSubsystem.java:198', def: 0.7, min: -1, max: 1, step: 0.05 },
+    { k: 'quintens', label: 'Quintens_Constant', code: 'Quintens_Constant', src: 'ShootingSubsystem.java:51', def: 2.15, min: 0.5, max: 4, step: 0.05,
+      help: 'Used by the auto "shoot" command (key F) to pick flywheel output from tag distance.' },
+  ]},
+  { id: 'intake', name: 'Intake', file: 'IntakeSubsystem.java', params: [
+    { k: 'rotUp', label: 'Hinge “up” setpoint', code: 'kRotationsUp', src: 'IntakeSubsystem.java:22', def: 15, min: 0, max: 20, step: 0.5, unit: 'rot' },
+    { k: 'rotDown', label: 'Hinge “down” setpoint', code: 'kRotationsDown', src: 'IntakeSubsystem.java:23', def: 0, min: -1, max: 10, step: 0.5, unit: 'rot' },
+    { k: 'liftP', label: 'Hinge kP', code: 'closedLoop.p(0.1)', src: 'IntakeSubsystem.java:36', def: 0.1, min: 0.005, max: 0.5, step: 0.005 },
+    { k: 'liftOut', label: 'Hinge max output', code: 'outputRange(-0.2, 0.2)', src: 'IntakeSubsystem.java:37', def: 0.2, min: 0.05, max: 1, step: 0.05 },
+    { k: 'manualUp', label: 'Manual “up” output', code: 'liftMotor.set(-0.3)', src: 'IntakeSubsystem.java:96', def: -0.3, min: -1, max: 1, step: 0.05,
+      help: 'The toggle treats positive rotations as up, but this "up" command drives negative.' },
+    { k: 'manualDown', label: 'Manual “down” output', code: 'liftMotor.set(0.3)', src: 'IntakeSubsystem.java:103', def: 0.3, min: -1, max: 1, step: 0.05 },
+    { k: 'rollerP', label: 'Roller kP', code: 'new PIDController(0.005, 0, 0)', src: 'IntakeSubsystem.java:20', def: 0.005, min: 0, max: 0.02, step: 0.0005,
+      help: 'P-only velocity control. Full output at any error over 200 RPM, and it settles below target.' },
+    { k: 'rollerRPM', label: 'Roller target', code: 'getRollerPIDOutput(5500)', src: 'IntakeSubsystem.java:69', def: 5500, min: 500, max: 5700, step: 100, unit: 'rpm' },
+  ]},
+  { id: 'vision', name: 'Vision auto-align', file: 'VisionSubsystem.java', note: 'Used by the auto "shoot" command. Hold F to run it.', params: [
+    { k: 'turnP', label: 'Turn kP', code: 'turnController kP', src: 'VisionSubsystem.java:28', def: 0.02, min: 0, max: 0.1, step: 0.001 },
+    { k: 'turnI', label: 'Turn kI', code: 'turnController kI', src: 'VisionSubsystem.java:28', def: 0.015, min: 0, max: 0.1, step: 0.001 },
+    { k: 'turnD', label: 'Turn kD', code: 'turnController kD', src: 'VisionSubsystem.java:28', def: 0, min: 0, max: 0.01, step: 0.0005 },
+    { k: 'yawSet', label: 'Yaw setpoint', code: 'calculate(yaw, -1.75)', src: 'VisionSubsystem.java:144', def: -1.75, min: -10, max: 10, step: 0.25, unit: '°' },
+  ]},
+  { id: 'sim', name: 'Sim assumptions', file: 'not in the code', note: 'Physical guesses the robot code does not define. Mass and MOI come from the PathPlanner settings.', params: [
+    { k: 'mass', label: 'Robot mass', code: 'robotMass', src: 'pathplanner/settings.json', def: 55, min: 25, max: 70, step: 1, unit: 'kg', sim: true },
+    { k: 'moi', label: 'Moment of inertia', code: 'robotMOI', src: 'pathplanner/settings.json', def: 2.67, min: 1, max: 10, step: 0.05, unit: 'kg·m²', sim: true },
+    { k: 'exitSpeed', label: 'Ball exit speed at full RPM', code: '', src: 'guess', def: 6.5, min: 4, max: 16, step: 0.25, unit: 'm/s', sim: true },
+    { k: 'launchAngle', label: 'Launch angle', code: '', src: 'guess', def: 62, min: 30, max: 80, step: 1, unit: '°', sim: true },
+    { k: 'flyTau', label: 'Flywheel time constant', code: '', src: 'guess', def: 0.45, min: 0.05, max: 2, step: 0.05, unit: 's', sim: true },
+    { k: 'feedRate', label: 'Feed rate at full indexer', code: '', src: 'guess', def: 9, min: 1, max: 20, step: 0.5, unit: 'ball/s', sim: true },
+    { k: 'rollerTau', label: 'Roller time constant', code: '', src: 'guess', def: 0.25, min: 0.02, max: 1, step: 0.01, unit: 's', sim: true },
+    { k: 'hingeGravity', label: 'Hinge gravity load', code: '', src: 'guess', def: 0.03, min: 0, max: 0.2, step: 0.005, unit: 'duty', sim: true },
+    { k: 'hopperCap', label: 'Hopper capacity', code: '', src: 'guess', def: 40, min: 5, max: 60, step: 1, unit: 'fuel', sim: true },
+    { k: 'camFov', label: 'Camera field of view', code: '', src: 'guess', def: 70, min: 30, max: 120, step: 1, unit: '°', sim: true },
+    { k: 'camRange', label: 'Camera tag range', code: '', src: 'guess', def: 6, min: 1, max: 10, step: 0.25, unit: 'm', sim: true },
+    { k: 'kbSlew', label: 'Keyboard stick ramp', code: '', src: 'input only', def: 0.12, min: 0, max: 0.5, step: 0.01, unit: 's', sim: true,
+      help: 'Keys are on/off, so the sim eases the virtual stick. Gamepads skip this.' },
+  ]},
+];
+
+const P = {}, DEF = {}, META = {};
+for (const g of GROUPS) for (const p of g.params) { P[p.k] = p.def; DEF[p.k] = p.def; META[p.k] = p; }
+try {
+  const saved = JSON.parse(localStorage.getItem('testbot-sim-params') || '{}');
+  for (const k in saved) if (k in P && typeof saved[k] === typeof DEF[k]) P[k] = saved[k];
+} catch (e) { /* storage unavailable */ }
+const saveParams = () => { try { localStorage.setItem('testbot-sim-params', JSON.stringify(P)); } catch (e) {} };
+
+// =====================================================================
+// Field (REBUILT 2026, approximate)
+// =====================================================================
+const FL = 16.541, FW = 8.069;
+const HALF = 0.851 / 2;                 // bumper half-width (PathPlanner robotWidth)
+const BALL_R = 0.075;
+const HUB_H = 0.597, HUB_TOP = 1.83;
+const HUBS = [
+  { x: 4.626, y: 4.035, alliance: 'blue', tag: { id: 26, x: 4.626 - HUB_H, y: 4.035, nx: -1 }, flash: 0, score: 0 },
+  { x: 11.915, y: 4.035, alliance: 'red', tag: { id: 10, x: 11.915 + HUB_H, y: 4.035, nx: 1 }, flash: 0, score: 0 },
+];
+
+// =====================================================================
+// Motors
+// =====================================================================
+const NEO = { free: 5676 * 2 * Math.PI / 60, stallT: 2.6, stallI: 105 };
+NEO.R = 12 / NEO.stallI; NEO.kt = NEO.stallT / NEO.stallI; NEO.kv = NEO.free / 12;
+const ramp = (cur, tgt, rr, dt) => rr <= 0 ? tgt : cur + clamp(tgt - cur, -dt / rr, dt / rr);
+
+// =====================================================================
+// Robot state
+// =====================================================================
+const modPositions = () => (P.configDir === 'test'
+  ? [[13, 11], [13, -11], [-13, 11], [-13, -11]]
+  : [[13.5, 13.5], [13.5, -13.5], [-13.5, 13.5], [-13.5, -13.5]]).map(([f, l]) => [f * IN, l * IN]);
+
+const R = {
+  x: 2.2, y: 4.035, th: 0, vx: 0, vy: 0, w: 0, gyroOff: 0,
+  hopper: 8, shots: 0, desat: false,
+  cmd: { vx: 0, vy: 0, w: 0 },
+  mods: ['FL', 'FR', 'BL', 'BR'].map((name) => ({ name, x: 0, y: 0, angle: 0, aRate: 0, aDuty: 0, prevErr: 0, dDuty: 0, vLong: 0, tgtAngle: 0, tgtSpeed: 0, current: 0, slip: false, roll: 0 })),
+};
+function applyModPositions() { modPositions().forEach(([x, y], i) => { R.mods[i].x = x; R.mods[i].y = y; }); }
+applyModPositions();
+
+const HW = {
+  shooter: { out: 0, rpm: 0, spin: 0 },
+  indexer: { out: 0 },
+  roller: { out: 0, rpm: 0, spin: 0 },
+  lift: { mode: 'duty', out: 0, sp: 0, rot: 0, vel: 0, applied: 0 },
+  feedAcc: 0, nanAt: -99, lastAutoTarget: 0,
+};
+const INTAKE = { isDown: true };
+function sparkSet(m, v) { if (Number.isNaN(v)) { HW.nanAt = simT; v = 0; } m.out = clamp(v, -1, 1); }
+const liftDuty = (v) => { HW.lift.mode = 'duty'; sparkSet(HW.lift, v); };
+const liftRef = (sp) => { HW.lift.mode = 'pos'; HW.lift.sp = sp; };
+
+// WPILib PIDController (20 ms period, default integrator range ±1)
+class PID {
+  constructor(gains) { this.gains = gains; this.reset(); }
+  reset() { this.err = 0; this.tot = 0; }
+  calc(meas, sp) {
+    const [kp, ki, kd] = this.gains();
+    const prev = this.err; this.err = sp - meas;
+    if (ki !== 0) this.tot = clamp(this.tot + this.err * 0.02, -1 / ki, 1 / ki);
+    return kp * this.err + ki * this.tot + kd * (this.err - prev) / 0.02;
+  }
+}
+const turnPID = new PID(() => [P.turnP, P.turnI, P.turnD]);
+const rollerPID = new PID(() => [P.rollerP, 0, 0]);
+
+const V = { has: false, yaw: 0, x: 0, id: 0, dist: 0 };
+
+// =====================================================================
+// Mini command scheduler (WPILib semantics: requirements, interrupts,
+// default commands, whileTrue / onTrue / toggleOnTrue triggers)
+// =====================================================================
+class Cmd {
+  constructor(name, reqs = []) { this.name = name; this.reqs = new Set(reqs); }
+  init() {} exec() {} done() { return false; } end() {}
+  leaf() { return this.name; }
+}
+const mk = (name, reqs, o) => Object.assign(new Cmd(name, reqs), o);
+const run = (name, reqs, fn) => mk(name, reqs, { exec: fn });
+const runOnce = (name, reqs, fn) => mk(name, reqs, { init: fn, done: () => true });
+const runEnd = (name, reqs, fn, end) => mk(name, reqs, { exec: fn, end });
+const waitSec = (t) => mk(`wait ${t}s`, [], { init() { this.t0 = simT; }, done() { return simT - this.t0 >= t - 1e-9; } });
+const union = (cs) => cs.flatMap((c) => [...c.reqs]);
+function withTimeout(c, t) {
+  return mk(c.name, [...c.reqs], {
+    init() { this.t0 = simT; c.init(); }, exec() { c.exec(); },
+    done() { return c.done() || simT - this.t0 >= t() - 1e-9; }, end(i) { c.end(i); }, leaf() { return c.leaf(); },
+  });
+}
+function sequence(name, ...cs) {
+  return mk(name, union(cs), {
+    init() { this.i = 0; cs[0].init(); },
+    exec() {
+      if (this.i >= cs.length) return;
+      const c = cs[this.i]; c.exec();
+      if (c.done()) { c.end(false); this.i++; if (this.i < cs.length) cs[this.i].init(); }
+    },
+    done() { return this.i >= cs.length; },
+    end(i) { if (i && this.i < cs.length) cs[this.i].end(true); },
+    leaf() { return this.i < cs.length ? cs[this.i].leaf() : this.name; },
+  });
+}
+function repeatedly(c) {
+  return mk(c.name, [...c.reqs], {
+    init() { c.init(); }, exec() { c.exec(); if (c.done()) { c.end(false); c.init(); } },
+    end(i) { c.end(i); }, leaf() { return c.leaf(); },
+  });
+}
+function parallel(name, ...cs) {
+  return mk(name, union(cs), {
+    init() { this.live = new Set(cs); cs.forEach((c) => c.init()); },
+    exec() { for (const c of [...this.live]) { c.exec(); if (c.done()) { c.end(false); this.live.delete(c); } } },
+    done() { return this.live.size === 0; },
+    end(i) { if (i) for (const c of this.live) c.end(true); },
+    leaf() { return [...this.live].map((c) => c.leaf()).join(' + '); },
+  });
+}
+function finallyDo(c, fn) {
+  return mk(c.name, [...c.reqs], { init() { c.init(); }, exec() { c.exec(); }, done() { return c.done(); }, end(i) { c.end(i); fn(i); }, leaf() { return c.leaf(); } });
+}
+
+const sched = {
+  running: new Set(), defaults: new Map(),
+  schedule(c) {
+    if (this.running.has(c)) return;
+    for (const o of [...this.running]) if ([...o.reqs].some((r) => c.reqs.has(r))) this.cancel(o);
+    c.init(); this.running.add(c);
+  },
+  cancel(c) { if (this.running.has(c)) { this.running.delete(c); c.end(true); } },
+  run() {
+    for (const c of [...this.running]) {
+      if (!this.running.has(c)) continue;
+      c.exec();
+      if (c.done()) { this.running.delete(c); c.end(false); }
+    }
+    for (const [sub, c] of this.defaults) {
+      if (![...this.running].some((r) => r.reqs.has(sub))) this.schedule(c);
+    }
+  },
+};
+const triggers = [];
+const whileTrue = (get, c) => triggers.push({ get, prev: false, rise: () => sched.schedule(c), fall: () => sched.cancel(c) });
+const onTrue = (get, c) => triggers.push({ get, prev: false, rise: () => sched.schedule(c) });
+const toggleOnTrue = (get, c) => triggers.push({ get, prev: false, rise: () => (sched.running.has(c) ? sched.cancel(c) : sched.schedule(c)) });
+
+// =====================================================================
+// Robot code, ported
+// =====================================================================
+const applyDeadband = (v, db) => (Math.abs(v) <= db ? 0 : (v - Math.sign(v) * db) / (1 - db));
+const curve = (v) => Math.sign(v) * Math.pow(Math.abs(v), P.inputExp);
+
+// SwerveSubsystem.drive -> YAGSL SwerveDrive.drive(translation, rotation, fieldRelative, openLoop=false)
+function swerveDrive(tx, ty, rot, fieldRel) {
+  let vx = tx, vy = ty;
+  if (fieldRel) {
+    const h = R.th - R.gyroOff, c = Math.cos(h), s = Math.sin(h);
+    vx = tx * c + ty * s; vy = -tx * s + ty * c;
+  }
+  R.cmd = { vx, vy, w: rot };
+  // ChassisSpeeds.discretize(speeds, 0.02)
+  const dt = 0.02, dth = rot * dt, half = dth / 2, cm1 = Math.cos(dth) - 1;
+  const htt = Math.abs(cm1) < 1e-9 ? 1 - dth * dth / 12 : -(half * Math.sin(dth)) / cm1;
+  const dx = vx * dt, dy = vy * dt;
+  vx = (dx * htt + dy * half) / dt; vy = (dy * htt - dx * half) / dt;
+  // inverse kinematics + desaturate to MAX_SPEED
+  const max = P.maxSpeed;
+  const st = R.mods.map((m) => { const mx = vx - rot * m.y, my = vy + rot * m.x; return { s: Math.hypot(mx, my), a: Math.atan2(my, mx) }; });
+  const top = Math.max(...st.map((q) => q.s));
+  R.desat = top > max + 1e-6;
+  if (R.desat) st.forEach((q) => { q.s *= max / top; });
+  R.mods.forEach((m, i) => {
+    let { s, a } = st[i];
+    if (Math.abs(s) <= 0.01 * max) a = m.tgtAngle;                 // anti-jitter: hold last angle
+    if (Math.abs(wrapRad(a - m.angle)) > Math.PI / 2) { a = wrapRad(a + Math.PI); s = -s; } // optimize
+    m.tgtAngle = a; m.tgtSpeed = s;
+  });
+}
+
+function calculateTargetRPM() {
+  if (V.has) {
+    const d = V.x;
+    const v0 = -Math.sqrt((9.81 * d * d) / (0.146977 * (d * 2.747477 - 1.8))) * P.quintens;
+    return ((v0 / (Math.PI * 0.1016)) * 60) / 5600;
+  }
+  return -0.75;
+}
+const isAtTargetSpeed = () => Math.abs(HW.shooter.rpm) >= Math.abs(calculateTargetRPM()) - 150;
+function getAutoAlignTurn() {
+  if (!V.has) { turnPID.reset(); return 0; }
+  return turnPID.calc(V.yaw, P.yawSet) * P.maxSpeed;
+}
+
+// --- command factories (one instance per use, like Java) ---
+const feedPulse = () => repeatedly(sequence('pulse',
+  withTimeout(run('feed on', ['shooter'], () => sparkSet(HW.indexer, P.indexOn)), () => P.onTime),
+  withTimeout(run('feed off', ['shooter'], () => sparkSet(HW.indexer, P.indexOff)), () => P.offTime)));
+const stopShooterMotors = () => { HW.shooter.out = 0; HW.indexer.out = 0; };
+
+const runFullShooter_np = () => finallyDo(sequence('runFullShooter_np',
+  withTimeout(run('spin up', ['shooter'], () => { sparkSet(HW.shooter, P.shooterDuty); HW.indexer.out = 0; }), () => P.spinUp),
+  feedPulse()), stopShooterMotors);
+const runFullShooter_Auto = () => sequence('runFullShooter_Auto',
+  withTimeout(run('auto spin up', ['shooter'], () => { const t = calculateTargetRPM(); HW.lastAutoTarget = t; sparkSet(HW.shooter, t); HW.indexer.out = 0; }), () => 1.0),
+  feedPulse());
+const indexBackwards = () => finallyDo(run('indexBackwards', ['shooter'], () => sparkSet(HW.indexer, P.indexBack)), () => { HW.indexer.out = 0; });
+const stopFullShooter = () => runOnce('stopFullShooter', ['shooter'], stopShooterMotors);
+
+const toggleIntakeCommand = () => runOnce('toggleIntakeCommand', ['intake'], () => {
+  if (INTAKE.isDown) { liftRef(P.rotUp); INTAKE.isDown = false; } else { liftRef(P.rotDown); INTAKE.isDown = true; }
+});
+const runIntakePID = () => runEnd('runIntakePID', ['intake'], () => sparkSet(HW.roller, rollerPID.calc(HW.roller.rpm, P.rollerRPM)), () => { HW.roller.out = 0; rollerPID.reset(); });
+const runIntakePIDOut = () => runEnd('runIntakePIDOut', ['intake'], () => sparkSet(HW.roller, rollerPID.calc(HW.roller.rpm, -P.rollerRPM)), () => { HW.roller.out = 0; rollerPID.reset(); });
+const runIntakeUp = () => finallyDo(run('runIntakeUp', ['intake'], () => liftDuty(P.manualUp)), () => liftDuty(0));
+const runIntakeDown = () => finallyDo(run('runIntakeDown', ['intake'], () => liftDuty(P.manualDown)), () => liftDuty(0));
+
+const turnshoot = () => parallel('turnshoot ("shoot")',
+  run('vision turn', ['drive'], () => { const turn = V.has ? getAutoAlignTurn() : 0; swerveDrive(0, 0, turn, false); }),
+  runFullShooter_Auto(),
+  sequence('hinge wiggle', waitSec(2.0), withTimeout(runIntakeUp(), () => 0.5), withTimeout(runIntakeDown(), () => 0.5)));
+
+// --- controllers ---
+const blankPad = () => ({ lx: 0, ly: 0, rx: 0, ry: 0, lt: 0, rt: 0, a: false, b: false, x: false, y: false, lb: false, rb: false, back: false, start: false });
+const PAD = { driver: blankPad(), op: blankPad() };
+
+// --- RobotContainer() ---
+sched.defaults.set('drive', run('drive (default)', ['drive'], () => {
+  const d = PAD.driver;
+  const ySpeed = P.strafeSign * curve(applyDeadband(d.rx, P.deadband)) * P.maxSpeed;
+  const xSpeed = P.fwdSign * curve(applyDeadband(d.ry, P.deadband)) * P.maxSpeed;
+  const turnOutput = P.rotSign * curve(applyDeadband(d.lx, P.deadband)) * P.rotScale;
+  swerveDrive(xSpeed, ySpeed, turnOutput, P.fieldRel);
+}));
+// configureBindings()
+whileTrue(() => PAD.driver.rt > 0.5, runFullShooter_np());
+whileTrue(() => PAD.driver.lt > 0.5, indexBackwards());
+onTrue(() => PAD.op.start, runOnce('zeroGyro', ['drive'], () => { R.gyroOff = R.th; }));
+onTrue(() => PAD.op.a, toggleIntakeCommand());
+toggleOnTrue(() => PAD.op.b, runIntakePID());
+toggleOnTrue(() => PAD.op.x, runIntakePIDOut());
+whileTrue(() => PAD.op.rb, runIntakeUp());
+whileTrue(() => PAD.op.lb, runIntakeDown());
+// sim-only: the auto named commands
+whileTrue(() => PAD.driver.y, turnshoot());
+onTrue(() => PAD.driver.back, stopFullShooter());
+
+// VisionSubsystem.periodic(): PhotonVision-style yaw (positive = right)
+function visionPeriodic() {
+  const c = Math.cos(R.th), s = Math.sin(R.th);
+  const camX = R.x + c * 0.40, camY = R.y + s * 0.40;
+  let hit = null;
+  for (const h of HUBS) {
+    const t = h.tag, dx = t.x - camX, dy = t.y - camY, dist = Math.hypot(dx, dy);
+    const lx = c * dx + s * dy, ly = -s * dx + c * dy;
+    const yaw = -Math.atan2(ly, lx) * DEG;
+    const facing = -(t.nx * dx) / dist;
+    if (lx > 0.15 && dist < P.camRange && Math.abs(yaw) < P.camFov / 2 && facing > 0.25) { hit = { id: t.id, yaw, lx, dist }; break; }
+  }
+  V.has = !!hit;
+  if (hit) { V.id = hit.id; V.yaw = hit.yaw + (Math.random() - 0.5) * 0.3; V.x = hit.lx; V.dist = hit.dist; }
+}
+
+// =====================================================================
+// Robot loop (50 Hz) and physics (1 kHz)
+// =====================================================================
+let simT = 0, tick = 0;
+const HIST = [];
+function robotPeriodic() {
+  visionPeriodic();
+  for (const t of triggers) { const v = !!t.get(); if (v && !t.prev) t.rise?.(); if (!v && t.prev) t.fall?.(); t.prev = v; }
+  sched.run();
+  const c = Math.cos(R.th), s = Math.sin(R.th);
+  HIST.push({ t: simT, cs: Math.hypot(R.cmd.vx, R.cmd.vy), as: Math.hypot(R.vx, R.vy), cw: R.cmd.w, aw: R.w,
+    cvx: R.cmd.vx, avx: c * R.vx + s * R.vy });
+  while (HIST.length && simT - HIST[0].t > 8) HIST.shift();
+}
+
+function physicsStep(dt) {
+  const r = P.wheelDiam * IN / 2;
+  const N = P.mass * 9.81 / 4, fmax = P.cof * N;
+  const Clat = 0.15 * (P.mass / 4) / dt;
+  const c = Math.cos(R.th), s = Math.sin(R.th);
+  const ux = c * R.vx + s * R.vy, uy = -s * R.vx + c * R.vy;
+  let Fx = 0, Fy = 0, T = 0;
+  const maxTurn = NEO.free / P.angleGear;
+  for (const m of R.mods) {
+    // steering: Spark position PID in degrees (1 kHz), ramp, NEO lag
+    const errDeg = wrapRad(m.tgtAngle - m.angle) * DEG;
+    const aCmd = clamp(P.angleP * errDeg + P.angleD * (errDeg - m.prevErr), -1, 1);
+    m.prevErr = errDeg;
+    m.aDuty = ramp(m.aDuty, aCmd, P.angleRamp, dt);
+    m.aRate += (m.aDuty * maxTurn - m.aRate) * Math.min(1, dt / 0.025);
+    m.angle = wrapRad(m.angle + m.aRate * dt);
+    // drive: feedforward (12 V / MAX_SPEED) + kP, ramp, current-limited NEO
+    const ca = Math.cos(m.angle), sa = Math.sin(m.angle);
+    const px = ux - R.w * m.y, py = uy + R.w * m.x;
+    const vLong = px * ca + py * sa, vLat = -px * sa + py * ca;
+    const dCmd = clamp(m.tgtSpeed / P.maxSpeed + P.driveP * (m.tgtSpeed - vLong), -1, 1);
+    m.dDuty = ramp(m.dDuty, dCmd, P.driveRamp, dt);
+    const wm = vLong / r * P.driveGear;
+    const I = clamp((m.dDuty * 12 - wm / NEO.kv) / NEO.R, -P.driveCurrent, P.driveCurrent);
+    m.current = I;
+    let Fl = I * NEO.kt * P.driveGear / r * 0.92 - 2.5 * vLong;
+    let Ft = -vLat * Clat;
+    const mag = Math.hypot(Fl, Ft);
+    m.slip = mag > fmax;
+    if (m.slip) { Fl *= fmax / mag; Ft *= fmax / mag; }
+    const fx = Fl * ca - Ft * sa, fy = Fl * sa + Ft * ca;
+    Fx += fx; Fy += fy; T += m.x * fy - m.y * fx;
+    m.vLong = vLong; m.roll -= vLong * dt / r;
+  }
+  R.vx += (c * Fx - s * Fy) / P.mass * dt;
+  R.vy += (s * Fx + c * Fy) / P.mass * dt;
+  R.w += T / P.moi * dt;
+  R.x += R.vx * dt; R.y += R.vy * dt; R.th = wrapRad(R.th + R.w * dt);
+  collideRobot();
+
+  // shooter flywheel (coast mode), indexer, roller, hinge
+  const sh = HW.shooter;
+  sh.rpm += (sh.out * 5676 - sh.rpm) * Math.min(1, dt / (sh.out !== 0 ? P.flyTau : 2.5));
+  sh.spin += sh.rpm / 60 * 2 * Math.PI * dt;
+  const ro = HW.roller;
+  ro.rpm += (ro.out * 5676 - ro.rpm) * Math.min(1, dt / P.rollerTau);
+  ro.spin += ro.rpm / 60 * 2 * Math.PI * dt * 0.25;
+  const L = HW.lift;
+  const duty = L.mode === 'pos' ? clamp(P.liftP * (L.sp - L.rot), -P.liftOut, P.liftOut) : L.out;
+  L.applied = duty;
+  if (L.mode === 'duty' && duty === 0) L.vel = 0;  // brake mode holds
+  else L.vel += ((duty - P.hingeGravity * Math.cos(hingeAngle())) * 94.6 - L.vel) * Math.min(1, dt / 0.06);
+  L.rot += L.vel * dt;
+  if (L.rot < -1) { L.rot = -1; L.vel = Math.max(0, L.vel); }
+  if (L.rot > 17) { L.rot = 17; L.vel = Math.min(0, L.vel); }
+
+  if (HW.indexer.out < -0.05 && R.hopper > 0 && Math.abs(sh.rpm) > 300) {
+    HW.feedAcc += Math.abs(HW.indexer.out) * P.feedRate * dt;
+    while (HW.feedAcc >= 1 && R.hopper > 0) { HW.feedAcc -= 1; launch(); }
+  } else HW.feedAcc = Math.min(HW.feedAcc, 0.999);
+}
+// hinge: rotations -> radians from horizontal (0 rot ≈ resting on floor, 15 rot ≈ stowed upright)
+const hingeAngle = () => (HW.lift.rot * (110 / 15) - 20) / DEG;
+const intakeDeployed = () => HW.lift.rot < 4;
+
+function collideRobot() {
+  const ext = HALF * (Math.abs(Math.cos(R.th)) + Math.abs(Math.sin(R.th)));
+  if (R.x < ext) { R.x = ext; R.vx = Math.max(0, R.vx); }
+  if (R.x > FL - ext) { R.x = FL - ext; R.vx = Math.min(0, R.vx); }
+  if (R.y < ext) { R.y = ext; R.vy = Math.max(0, R.vy); }
+  if (R.y > FW - ext) { R.y = FW - ext; R.vy = Math.min(0, R.vy); }
+  const rad = 0.5;
+  for (const h of HUBS) {
+    const qx = clamp(R.x, h.x - HUB_H, h.x + HUB_H), qy = clamp(R.y, h.y - HUB_H, h.y + HUB_H);
+    const dx = R.x - qx, dy = R.y - qy, d = Math.hypot(dx, dy);
+    if (d < rad && d > 1e-6) {
+      const nx = dx / d, ny = dy / d;
+      R.x = qx + nx * rad; R.y = qy + ny * rad;
+      const vn = R.vx * nx + R.vy * ny;
+      if (vn < 0) { R.vx -= vn * nx; R.vy -= vn * ny; }
+    }
+  }
+}
+
+// =====================================================================
+// Fuel
+// =====================================================================
+const POOL = 320;
+const balls = Array.from({ length: POOL }, () => ({ x: 0, y: 0, z: BALL_R, vx: 0, vy: 0, vz: 0, active: false, respawnAt: 0, hub: null }));
+function resetField() {
+  let i = 0;
+  for (let gx = 0; gx < 12; gx++) for (let gy = 0; gy < 21; gy++) {
+    const b = balls[i++];
+    Object.assign(b, { x: 7.35 + gx * 0.165 + (gy % 2) * 0.08, y: 2.3 + gy * 0.165, z: BALL_R, vx: 0, vy: 0, vz: 0, active: true, respawnAt: 0, hub: null });
+  }
+  for (; i < POOL; i++) Object.assign(balls[i], { active: false, respawnAt: 0, hub: null });
+  HUBS.forEach((h) => { h.score = 0; h.flash = 0; });
+  R.shots = 0;
+}
+function launch() {
+  let b = balls.find((q) => !q.active && !q.respawnAt);
+  if (!b) {  // pool exhausted (robot resets refill the hopper): recycle the grounded ball farthest from the robot
+    let far = -1;
+    for (const q of balls) { const d = q.active && q.z < 0.1 ? Math.hypot(q.x - R.x, q.y - R.y) : -1; if (d > far) { far = d; b = q; } }
+    if (!b || far < 0) return;
+  }
+  R.hopper--; R.shots++;
+  const sh = HW.shooter;
+  const spd = P.exitSpeed * Math.min(1.15, Math.abs(sh.rpm) / 5676);
+  sh.rpm *= 0.97;
+  const el = (P.launchAngle + (Math.random() - 0.5) * 2) / DEG;
+  const az = R.th + (Math.random() - 0.5) * 0.03;
+  const ox = 0.22, c = Math.cos(R.th), s = Math.sin(R.th);
+  Object.assign(b, {
+    x: R.x + c * ox, y: R.y + s * ox, z: 0.68,
+    vx: Math.cos(el) * Math.cos(az) * spd + R.vx - R.w * s * ox,
+    vy: Math.cos(el) * Math.sin(az) * spd + R.vy + R.w * c * ox,
+    vz: Math.sin(el) * spd, active: true, respawnAt: 0, hub: null,
+  });
+}
+function ballStep(dt) {
+  const c = Math.cos(R.th), s = Math.sin(R.th);
+  const deployed = intakeDeployed();
+  for (const b of balls) {
+    if (!b.active) {
+      if (b.respawnAt && simT >= b.respawnAt) {   // hub returns fuel to the neutral zone
+        const dir = Math.sign(FL / 2 - b.hub.x);
+        Object.assign(b, { x: b.hub.x + dir * (HUB_H + 0.12), y: b.hub.y + (Math.random() - 0.5) * 0.9, z: 0.35,
+          vx: dir * (1.6 + Math.random()), vy: (Math.random() - 0.5) * 1.2, vz: 0, active: true, respawnAt: 0, hub: null });
+      }
+      continue;
+    }
+    const pz = b.z;
+    const airborne = b.z > BALL_R + 1e-4 || b.vz > 0;
+    if (airborne) {
+      b.vz -= 9.81 * dt;
+      const k = 1 - 0.08 * dt;
+      b.vx *= k; b.vy *= k;
+    } else {
+      const sp = Math.hypot(b.vx, b.vy);
+      if (sp > 0) { const ns = Math.max(0, sp - 1.6 * dt); b.vx *= ns / sp; b.vy *= ns / sp; }
+    }
+    b.x += b.vx * dt; b.y += b.vy * dt; b.z += b.vz * dt;
+    if (b.z < BALL_R) { b.z = BALL_R; b.vz = b.vz < -0.6 ? -b.vz * 0.35 : 0; b.vx *= 0.85; b.vy *= 0.85; }
+    if (b.x < BALL_R) { b.x = BALL_R; b.vx = Math.abs(b.vx) * 0.4; }
+    if (b.x > FL - BALL_R) { b.x = FL - BALL_R; b.vx = -Math.abs(b.vx) * 0.4; }
+    if (b.y < BALL_R) { b.y = BALL_R; b.vy = Math.abs(b.vy) * 0.4; }
+    if (b.y > FW - BALL_R) { b.y = FW - BALL_R; b.vy = -Math.abs(b.vy) * 0.4; }
+    // hubs
+    for (const h of HUBS) {
+      const dx = b.x - h.x, dy = b.y - h.y;
+      if (Math.abs(dx) < HUB_H + BALL_R && Math.abs(dy) < HUB_H + BALL_R) {
+        if (pz >= HUB_TOP && b.z < HUB_TOP && Math.abs(dx) < 0.6 && Math.abs(dy) < 0.6) {
+          b.active = false; b.respawnAt = simT + 1.4; b.hub = h; h.score++; h.flash = 1; break;
+        }
+        if (b.z < HUB_TOP) {
+          const px = HUB_H + BALL_R - Math.abs(dx), py = HUB_H + BALL_R - Math.abs(dy);
+          if (px < py) { b.x = h.x + Math.sign(dx) * (HUB_H + BALL_R); b.vx = Math.sign(dx) * Math.abs(b.vx) * 0.4; }
+          else { b.y = h.y + Math.sign(dy) * (HUB_H + BALL_R); b.vy = Math.sign(dy) * Math.abs(b.vy) * 0.4; }
+        }
+      }
+    }
+    if (!b.active || b.z > 0.6) continue;
+    // robot (in robot frame)
+    const rx = b.x - R.x, ry = b.y - R.y;
+    const lx = c * rx + s * ry, ly = -s * rx + c * ry;
+    if (Math.abs(ly) > HALF + 0.5 || Math.abs(lx) > HALF + 0.6) continue;
+    const inZone = deployed && lx < -HALF + 0.04 && lx > -HALF - 0.38 && Math.abs(ly) < 0.33 && b.z < 0.3;
+    if (inZone && HW.roller.rpm > 1500 && R.hopper < P.hopperCap) {
+      b.active = false; R.hopper++; HW.roller.rpm *= 0.97; continue;
+    }
+    const xmin = deployed ? -HALF - 0.38 : -HALF;
+    const yHalf = (lx < -HALF) ? 0.33 : HALF;
+    if (lx > xmin - BALL_R && lx < HALF + BALL_R && Math.abs(ly) < yHalf + BALL_R) {
+      const pxp = HALF + BALL_R - lx, pxn = lx - (xmin - BALL_R), py = yHalf + BALL_R - Math.abs(ly);
+      let nlx = 0, nly = 0, pen;
+      if (pxp <= pxn && pxp <= py) { nlx = 1; pen = pxp; } else if (pxn <= py) { nlx = -1; pen = pxn; } else { nly = Math.sign(ly) || 1; pen = py; }
+      const nx = c * nlx - s * nly, ny = s * nlx + c * nly;
+      b.x += nx * pen; b.y += ny * pen;
+      const pvx = R.vx - R.w * ry, pvy = R.vy + R.w * rx;
+      let rel = (b.vx - pvx) * nx + (b.vy - pvy) * ny;
+      if (inZone && HW.roller.rpm < -1500) rel = Math.min(rel, -3);
+      if (rel < 0) { b.vx -= 1.3 * rel * nx; b.vy -= 1.3 * rel * ny; }
+    }
+  }
+}
+// ball-ball separation on the ground (spatial hash, once per frame)
+function ballPairs() {
+  const cell = 0.16, grid = new Map();
+  for (let i = 0; i < POOL; i++) {
+    const b = balls[i]; if (!b.active || b.z > 0.35) continue;
+    const key = Math.floor(b.x / cell) * 1000 + Math.floor(b.y / cell);
+    (grid.get(key) || grid.set(key, []).get(key)).push(i);
+  }
+  const D = BALL_R * 2;
+  for (const [key, list] of grid) {
+    const gx = Math.floor(key / 1000), gy = key - gx * 1000;
+    for (let ox = 0; ox <= 1; ox++) for (let oy = -1; oy <= 1; oy++) {
+      if (ox === 0 && oy < 0) continue;
+      const other = ox === 0 && oy === 0 ? list : grid.get((gx + ox) * 1000 + gy + oy);
+      if (!other) continue;
+      for (const i of list) for (const j of other) {
+        if (other === list && j <= i) continue;
+        const a = balls[i], b = balls[j], dx = b.x - a.x, dy = b.y - a.y, d2 = dx * dx + dy * dy;
+        if (d2 >= D * D || d2 < 1e-10) continue;
+        const d = Math.sqrt(d2), nx = dx / d, ny = dy / d, push = (D - d) / 2;
+        a.x -= nx * push; a.y -= ny * push; b.x += nx * push; b.y += ny * push;
+        const rv = (b.vx - a.vx) * nx + (b.vy - a.vy) * ny;
+        if (rv < 0) { const j2 = -rv * 0.45; a.vx -= j2 * nx; a.vy -= j2 * ny; b.vx += j2 * nx; b.vy += j2 * ny; }
+      }
+    }
+  }
+}
+
+function resetRobot() {
+  Object.assign(R, { x: 2.2, y: 4.035, th: 0, vx: 0, vy: 0, w: 0, gyroOff: 0, hopper: 8 });
+  R.mods.forEach((m) => Object.assign(m, { angle: 0, aRate: 0, aDuty: 0, dDuty: 0, tgtAngle: 0, tgtSpeed: 0, vLong: 0 }));
+  for (const c of [...sched.running]) sched.cancel(c);
+  Object.assign(HW.shooter, { out: 0, rpm: 0 }); HW.indexer.out = 0;
+  Object.assign(HW.roller, { out: 0, rpm: 0 });
+  Object.assign(HW.lift, { mode: 'duty', out: 0, sp: 0, rot: 0, vel: 0 });
+  INTAKE.isDown = true; trailN = 0;
+}
+
+// =====================================================================
+// Input
+// =====================================================================
+const KB = new Set();
+const kb = { rx: 0, ry: 0, lx: 0 };
+const isField = (e) => !(e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement || e.target instanceof HTMLTextAreaElement);
+const DRIVE_KEYS = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'KeyE', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Space', 'ShiftLeft', 'ShiftRight', 'KeyF', 'KeyG', 'KeyR', 'Digit1', 'Digit2', 'Digit3', 'BracketLeft', 'BracketRight', 'KeyC']);
+addEventListener('keydown', (e) => {
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  if (helpOpen()) {
+    if (e.code === 'Escape' || (e.code === 'KeyH' && isField(e))) { e.preventDefault(); closeHelp(); }
+    return;
+  }
+  if (!isField(e)) return;
+  if (e.code === 'KeyH' || e.key === '?') { e.preventDefault(); openHelp(); return; }
+  if (!DRIVE_KEYS.has(e.code)) return;
+  if (e.target instanceof HTMLButtonElement && (e.code === 'Space')) e.target.blur();
+  e.preventDefault();
+  if (e.code === 'KeyC' && !e.repeat) cycleCam();
+  KB.add(e.code);
+});
+addEventListener('keyup', (e) => KB.delete(e.code));
+addEventListener('blur', () => KB.clear());
+
+let padsSeen = [];
+function readInputs(dt) {
+  const tgt = {
+    rx: (KB.has('KeyD') ? 1 : 0) - (KB.has('KeyA') ? 1 : 0),
+    ry: (KB.has('KeyS') ? 1 : 0) - (KB.has('KeyW') ? 1 : 0),
+    lx: ((KB.has('KeyE') || KB.has('ArrowRight')) ? 1 : 0) - ((KB.has('KeyQ') || KB.has('ArrowLeft')) ? 1 : 0),
+  };
+  const n = Math.hypot(tgt.rx, tgt.ry); if (n > 1) { tgt.rx /= n; tgt.ry /= n; }
+  const step = P.kbSlew > 0 ? dt / P.kbSlew : 1;
+  for (const k in kb) kb[k] += clamp(tgt[k] - kb[k], -step, step);
+  const D = PAD.driver, O = PAD.op;
+  Object.assign(D, blankPad(), { rx: kb.rx, ry: kb.ry, lx: kb.lx,
+    rt: KB.has('Space') ? 1 : 0, lt: (KB.has('ShiftLeft') || KB.has('ShiftRight')) ? 1 : 0, y: KB.has('KeyF'), back: KB.has('KeyG') });
+  Object.assign(O, blankPad(), { a: KB.has('Digit1'), b: KB.has('Digit2'), x: KB.has('Digit3'), rb: KB.has('BracketRight'), lb: KB.has('BracketLeft'), start: KB.has('KeyR') });
+  let pads = [];
+  try { pads = [...(navigator.getGamepads ? navigator.getGamepads() : [])].filter(Boolean); } catch (e) {}
+  padsSeen = pads;
+  const ax = (p, i) => p.axes[i] || 0, bt = (p, i) => (p.buttons[i] ? p.buttons[i].value : 0);
+  const pick = (a, b) => (Math.abs(b) > Math.abs(a) ? b : a);
+  const gd = pads[0], go = pads[1] || pads[0];
+  if (gd) {
+    D.lx = pick(D.lx, ax(gd, 0)); D.ly = ax(gd, 1); D.rx = pick(D.rx, ax(gd, 2)); D.ry = pick(D.ry, ax(gd, 3));
+    D.lt = Math.max(D.lt, bt(gd, 6)); D.rt = Math.max(D.rt, bt(gd, 7));
+    D.y = D.y || bt(gd, 3) > 0.5; D.back = D.back || bt(gd, 8) > 0.5;
+  }
+  if (go) {
+    O.a = O.a || bt(go, 0) > 0.5; O.b = O.b || bt(go, 1) > 0.5; O.x = O.x || bt(go, 2) > 0.5;
+    O.lb = O.lb || bt(go, 4) > 0.5; O.rb = O.rb || bt(go, 5) > 0.5; O.start = O.start || bt(go, 9) > 0.5;
+  }
+}
+
+// =====================================================================
+// Three.js scene
+// =====================================================================
+const stage = $('#stage');
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.05;
+renderer.domElement.className = 'gl';
+renderer.domElement.tabIndex = 0;
+renderer.domElement.setAttribute('aria-label', 'Field view. Click, then drive with the keyboard or a gamepad.');
+stage.prepend(renderer.domElement);
+$('#loading').remove();
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0c0f13);
+scene.fog = new THREE.Fog(0x0c0f13, 22, 48);
+const camera = new THREE.PerspectiveCamera(55, 1, 0.05, 120);
+const W = (x, y, z = 0) => new THREE.Vector3(x, z, -y);
+
+scene.add(new THREE.HemisphereLight(0xd6dfeb, 0x23272e, 0.9));
+const sun = new THREE.DirectionalLight(0xffffff, 1.9);
+sun.position.copy(W(FL / 2 - 3, FW / 2 - 6, 14));
+sun.target.position.copy(W(FL / 2, FW / 2, 0));
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+Object.assign(sun.shadow.camera, { left: -11, right: 11, top: 9, bottom: -9, near: 1, far: 40 });
+sun.shadow.bias = -0.0004;
+scene.add(sun, sun.target);
+
+const mat = (color, o = {}) => new THREE.MeshStandardMaterial({ color, roughness: 0.75, metalness: 0.05, ...o });
+const ALU = mat(0xb9c0c8, { metalness: 0.55, roughness: 0.4 });
+const DARK = mat(0x24292f, { roughness: 0.6 });
+const BLUE = 0x2f6ad8, RED = 0xd23f35;
+
+// carpet
+function carpetTexture() {
+  const cv = document.createElement('canvas'); cv.width = 2048; cv.height = 1000;
+  const g = cv.getContext('2d'), sx = cv.width / FL, sy = cv.height / FW;
+  g.fillStyle = '#4b5059'; g.fillRect(0, 0, cv.width, cv.height);
+  for (let i = 0; i < 9000; i++) { g.fillStyle = Math.random() < 0.5 ? 'rgba(255,255,255,0.035)' : 'rgba(0,0,0,0.06)'; g.fillRect(Math.random() * cv.width, Math.random() * cv.height, 3, 3); }
+  g.fillStyle = 'rgba(47,106,216,0.16)'; g.fillRect(0, 0, 4.03 * sx, cv.height);
+  g.fillStyle = 'rgba(210,63,53,0.16)'; g.fillRect((FL - 4.03) * sx, 0, 4.03 * sx, cv.height);
+  const line = (x, color) => { g.fillStyle = color; g.fillRect(x * sx - 3, 0, 6, cv.height); };
+  line(4.03, '#4f86ea'); line(FL - 4.03, '#e25b50'); line(FL / 2, '#e9ecef');
+  g.strokeStyle = 'rgba(233,236,239,0.5)'; g.lineWidth = 4; g.strokeRect(2, 2, cv.width - 4, cv.height - 4);
+  // 1 m grid ticks, faint
+  g.fillStyle = 'rgba(255,255,255,0.05)';
+  for (let x = 1; x < FL; x++) for (let y = 1; y < FW; y++) g.fillRect(x * sx - 2, (FW - y) * sy - 2, 4, 4);
+  const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8; return t;
+}
+const carpet = new THREE.Mesh(new THREE.PlaneGeometry(FL, FW), new THREE.MeshStandardMaterial({ map: carpetTexture(), roughness: 0.95 }));
+carpet.rotation.x = -Math.PI / 2; carpet.position.copy(W(FL / 2, FW / 2, 0)); carpet.receiveShadow = true; scene.add(carpet);
+const floor = new THREE.Mesh(new THREE.PlaneGeometry(80, 60), mat(0x15191f, { roughness: 1 }));
+floor.rotation.x = -Math.PI / 2; floor.position.copy(W(FL / 2, FW / 2, -0.005)); floor.receiveShadow = true; scene.add(floor);
+
+// walls
+const POLY = new THREE.MeshStandardMaterial({ color: 0xcfe3f5, transparent: true, opacity: 0.14, roughness: 0.1, metalness: 0, depthWrite: false });
+function box(w, h, d, m, pos, shadow = true) {
+  const o = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m); o.position.copy(pos); o.castShadow = shadow; o.receiveShadow = true; scene.add(o); return o;
+}
+for (const y of [0, FW]) {
+  box(FL, 0.5, 0.03, POLY, W(FL / 2, y, 0.25), false);
+  box(FL, 0.04, 0.06, ALU, W(FL / 2, y, 0.52));
+}
+for (const [x, col] of [[0, BLUE], [FL, RED]]) {
+  box(0.06, 1.0, FW, mat(col, { roughness: 0.5 }), W(x, FW / 2, 0.5));
+  box(0.04, 1.0, FW, POLY, W(x, FW / 2, 1.5), false);
+  box(0.06, 0.05, FW, ALU, W(x, FW / 2, 2.02));
+}
+
+// hubs + tags
+function tagTexture(id) {
+  const cv = document.createElement('canvas'); cv.width = cv.height = 256;
+  const g = cv.getContext('2d');
+  g.fillStyle = '#fff'; g.fillRect(0, 0, 256, 256); g.fillStyle = '#111'; g.fillRect(28, 28, 200, 200);
+  let seed = id * 7919 + 13; const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  const cell = 200 / 8; g.fillStyle = '#fff';
+  for (let i = 1; i < 7; i++) for (let j = 1; j < 7; j++) if (rnd() > 0.5) g.fillRect(28 + i * cell, 28 + j * cell, cell, cell);
+  g.fillStyle = '#111'; g.font = '600 20px "IBM Plex Mono", monospace'; g.fillText(String(id), 6, 250);
+  const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace; return t;
+}
+for (const h of HUBS) {
+  const col = h.alliance === 'blue' ? BLUE : RED;
+  box(HUB_H * 2, 1.2, HUB_H * 2, mat(0x2b3037), W(h.x, h.y, 0.6));
+  h.band = box(HUB_H * 2 + 0.02, 0.08, HUB_H * 2 + 0.02, mat(col, { emissive: col, emissiveIntensity: 0.2 }), W(h.x, h.y, 1.16));
+  const funnel = new THREE.Mesh(new THREE.CylinderGeometry(0.85, 0.62, 0.63, 4, 1, true),
+    new THREE.MeshStandardMaterial({ color: col, transparent: true, opacity: 0.45, side: THREE.DoubleSide, roughness: 0.4 }));
+  funnel.rotation.y = Math.PI / 4; funnel.position.copy(W(h.x, h.y, 1.2 + 0.315)); funnel.castShadow = true; scene.add(funnel);
+  const rim = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.CylinderGeometry(0.85, 0.62, 0.63, 4, 1, true)), new THREE.LineBasicMaterial({ color: 0xe9ecef }));
+  rim.rotation.y = Math.PI / 4; rim.position.copy(funnel.position); scene.add(rim);
+  const tag = new THREE.Mesh(new THREE.PlaneGeometry(0.26, 0.26), new THREE.MeshBasicMaterial({ map: tagTexture(h.tag.id) }));
+  tag.position.copy(W(h.tag.x + h.tag.nx * 0.004, h.tag.y, 0.95));
+  tag.rotation.y = h.tag.nx < 0 ? -Math.PI / 2 : Math.PI / 2; scene.add(tag);
+  h.tagFrame = new THREE.Mesh(new THREE.PlaneGeometry(0.32, 0.32), new THREE.MeshBasicMaterial({ color: 0x46c083, transparent: true, opacity: 0 }));
+  h.tagFrame.position.copy(W(h.tag.x + h.tag.nx * 0.002, h.tag.y, 0.95)); h.tagFrame.rotation.y = tag.rotation.y; scene.add(h.tagFrame);
+}
+
+// ---------------- robot ----------------
+const robotG = new THREE.Group(); scene.add(robotG);
+const L3 = (x, y, z) => new THREE.Vector3(x, z, -y);       // robot frame -> group local
+function rbox(w, l, h, m, x, y, z, parent = robotG) {        // w along robot x, l along robot y
+  const o = new THREE.Mesh(new THREE.BoxGeometry(w, h, l), m); o.position.copy(L3(x, y, z)); o.castShadow = true; o.receiveShadow = true; parent.add(o); return o;
+}
+const bumperMat = mat(BLUE, { roughness: 0.85 });
+rbox(0.09, 0.851, 0.13, bumperMat, HALF - 0.045, 0, 0.1);
+rbox(0.09, 0.851, 0.13, bumperMat, -HALF + 0.045, 0, 0.1);
+rbox(0.851 - 0.18, 0.09, 0.13, bumperMat, 0, HALF - 0.045, 0.1);
+rbox(0.851 - 0.18, 0.09, 0.13, bumperMat, 0, -HALF + 0.045, 0.1);
+rbox(0.69, 0.69, 0.04, ALU, 0, 0, 0.13);
+{ // +X chevron
+  const sh = new THREE.Shape(); sh.moveTo(0.22, 0); sh.lineTo(0.06, 0.12); sh.lineTo(0.06, 0.05); sh.lineTo(-0.02, 0.05); sh.lineTo(-0.02, -0.05); sh.lineTo(0.06, -0.05); sh.lineTo(0.06, -0.12); sh.lineTo(0.22, 0);
+  const chev = new THREE.Mesh(new THREE.ShapeGeometry(sh), new THREE.MeshBasicMaterial({ color: 0xf0a42e }));
+  chev.rotation.x = -Math.PI / 2; chev.position.set(0.12, 0.152, 0); robotG.add(chev);
+}
+// hopper
+const hopperBox = new THREE.Mesh(new THREE.BoxGeometry(0.48, 0.42, 0.52), POLY);
+hopperBox.position.copy(L3(-0.08, 0, 0.36)); robotG.add(hopperBox);
+const hopperEdges = new THREE.LineSegments(new THREE.EdgesGeometry(hopperBox.geometry), new THREE.LineBasicMaterial({ color: 0x9aa4b0 }));
+hopperEdges.position.copy(hopperBox.position); robotG.add(hopperEdges);
+// shooter
+rbox(0.26, 0.012, 0.46, ALU, 0.26, 0.2, 0.4); rbox(0.26, 0.012, 0.46, ALU, 0.26, -0.2, 0.4);
+const flyG = new THREE.Group(); flyG.position.copy(L3(0.3, 0, 0.64)); robotG.add(flyG);
+{
+  const fw = new THREE.Mesh(new THREE.CylinderGeometry(0.0508, 0.0508, 0.38, 24), DARK); fw.rotation.x = Math.PI / 2; fw.castShadow = true; flyG.add(fw);
+  for (let i = 0; i < 3; i++) { const st = new THREE.Mesh(new THREE.BoxGeometry(0.012, 0.012, 0.385), new THREE.MeshBasicMaterial({ color: 0xf0a42e })); const a = i * 2.094; st.position.set(Math.cos(a) * 0.05, Math.sin(a) * 0.05, 0); flyG.add(st); }
+}
+const hood = rbox(0.2, 0.39, 0.012, DARK, 0.24, 0, 0.74); hood.rotation.z = 0.5;
+// camera
+rbox(0.05, 0.08, 0.05, DARK, 0.4, 0, 0.42);
+const led = new THREE.Mesh(new THREE.SphereGeometry(0.014, 12, 8), new THREE.MeshBasicMaterial({ color: 0x5a2220 }));
+led.position.copy(L3(0.43, 0.025, 0.45)); robotG.add(led);
+// intake on a hinge at the back
+const pivot = new THREE.Group(); pivot.position.copy(L3(-HALF + 0.05, 0, 0.19)); robotG.add(pivot);
+for (const y of [0.3, -0.3]) { const arm = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.035, 0.02), ALU); arm.position.set(-0.21, 0, -y); arm.castShadow = true; pivot.add(arm); }
+const rollerG = new THREE.Group(); rollerG.position.set(-0.4, 0, 0); pivot.add(rollerG);
+{
+  const rl = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.6, 16), mat(0x3d9a62, { roughness: 0.9 })); rl.rotation.x = Math.PI / 2; rl.castShadow = true; rollerG.add(rl);
+  for (let i = 0; i < 4; i++) { const fin = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.01, 0.58), mat(0x2e7a4c)); fin.rotation.z = i * Math.PI / 4; rollerG.add(fin); }
+}
+// swerve modules
+const wheelMat = mat(0x1b1d21, { roughness: 0.95 });
+const modMeshes = R.mods.map((m) => {
+  const g = new THREE.Group(); robotG.add(g);
+  const spinner = new THREE.Group(); spinner.position.y = 0.0508 - 0.0508; g.add(spinner);
+  const wheel = new THREE.Mesh(new THREE.CylinderGeometry(0.0508, 0.0508, 0.04, 24), wheelMat); wheel.rotation.x = Math.PI / 2; wheel.castShadow = true; spinner.add(wheel);
+  const mark = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.03, 0.042), new THREE.MeshBasicMaterial({ color: 0xe9ecef })); mark.position.set(0, 0.04, 0); spinner.add(mark);
+  for (const z of [0.03, -0.03]) { const fork = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.1, 0.008), ALU); fork.position.set(0, 0.03, z); g.add(fork); }
+  const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.03, 20), ALU); cap.position.y = 0.1; g.add(cap);
+  const arrow = new THREE.Mesh(new THREE.BoxGeometry(1, 0.006, 0.018), new THREE.MeshBasicMaterial({ color: 0xf0a42e, transparent: true, opacity: 0.9 }));
+  robotG.add(arrow);
+  return { g, spinner, arrow };
+});
+function placeModules() { R.mods.forEach((m, i) => { modMeshes[i].g.position.copy(L3(m.x, m.y, 0.0508)); }); }
+placeModules();
+// fuel in hopper
+const hopperBalls = new THREE.InstancedMesh(new THREE.SphereGeometry(0.07, 12, 8), mat(0xf2cc35, { roughness: 0.7 }), 60);
+hopperBalls.castShadow = true; robotG.add(hopperBalls);
+{
+  const m4 = new THREE.Matrix4();
+  for (let i = 0; i < 60; i++) {
+    const layer = Math.floor(i / 9), k = i % 9;
+    m4.makeTranslation(-0.08 + ((k % 3) - 1) * 0.15, 0.22 + layer * 0.12 + (layer % 2) * 0.01, ((Math.floor(k / 3)) - 1) * 0.15 + (layer % 2) * 0.03);
+    hopperBalls.setMatrixAt(i, m4);
+  }
+  hopperBalls.count = 0;
+}
+
+// field fuel
+const ballMesh = new THREE.InstancedMesh(new THREE.SphereGeometry(BALL_R, 14, 10), mat(0xf2cc35, { roughness: 0.7 }), POOL);
+ballMesh.castShadow = true; ballMesh.receiveShadow = true; scene.add(ballMesh);
+const m4 = new THREE.Matrix4(), ZERO = new THREE.Matrix4().makeScale(0, 0, 0);
+
+// trail + velocity arrows
+const TRAIL = 600;
+const trailGeo = new THREE.BufferGeometry();
+trailGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(TRAIL * 3), 3));
+const trail = new THREE.Line(trailGeo, new THREE.LineBasicMaterial({ color: 0x7fa6e8, transparent: true, opacity: 0.55 }));
+trail.frustumCulled = false; scene.add(trail);
+let trailN = 0, trailT = 0;
+const cmdArrow = new THREE.ArrowHelper(new THREE.Vector3(1, 0, 0), new THREE.Vector3(), 1, 0xf0a42e, 0.14, 0.09);
+const actArrow = new THREE.ArrowHelper(new THREE.Vector3(1, 0, 0), new THREE.Vector3(), 1, 0xe5e8ec, 0.14, 0.09);
+scene.add(cmdArrow, actArrow);
+
+// shooting range rings: where a full-power shot from the robot's center should drop into the hub
+function shotBand() {
+  const v = P.exitSpeed * Math.min(1, Math.abs(P.shooterDuty)) * 0.95, el = P.launchAngle / DEG;
+  const vx = v * Math.cos(el), vz = v * Math.sin(el), disc = vz * vz - 2 * 9.81 * (HUB_TOP - 0.68);
+  if (v < 0.5 || disc < 0) return null;
+  const reach = vx * (vz + Math.sqrt(disc)) / 9.81 + 0.22;   // muzzle sits 0.22 m ahead of center
+  const lo = Math.max(HUB_H + 0.45, reach - 0.55), hi = reach + 0.55;
+  return hi > lo ? [lo, hi] : null;
+}
+const ringMat = new THREE.MeshBasicMaterial({ color: 0x46c083, transparent: true, opacity: 0.16, depthWrite: false });
+const ringLineMat = new THREE.LineBasicMaterial({ color: 0x46c083, transparent: true, opacity: 0.8 });
+const ringGroups = HUBS.map((h) => { const g = new THREE.Group(); g.position.copy(W(h.x, h.y, 0.01)); scene.add(g); return g; });
+let band = null;
+function updateRings() {
+  band = shotBand();
+  for (const g of ringGroups) {
+    for (const c of [...g.children]) { c.geometry.dispose(); g.remove(c); }
+    if (!band) continue;
+    const fill = new THREE.Mesh(new THREE.RingGeometry(band[0], band[1], 96), ringMat);
+    fill.rotation.x = -Math.PI / 2; g.add(fill);
+    for (const r of band) {
+      const pts = Array.from({ length: 97 }, (_, i) => new THREE.Vector3(Math.cos(i / 96 * 2 * Math.PI) * r, 0.002, Math.sin(i / 96 * 2 * Math.PI) * r));
+      g.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), ringLineMat));
+    }
+  }
+}
+updateRings();
+
+// ---------------- camera rig ----------------
+const CAM = { mode: 'chase', yawOff: 0, pitch: 0.42, dist: 3.8, orbitYaw: Math.PI, hs: 0, target: W(R.x, R.y, 0.35), pos: new THREE.Vector3() };
+const MODES = ['chase', 'driver', 'orbit', 'top'];
+function setCam(mode) {
+  CAM.mode = mode;
+  if (mode === 'orbit') CAM.orbitYaw = CAM.hs + CAM.yawOff;
+  document.querySelectorAll('[data-cam]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.cam === mode)));
+}
+function cycleCam() { setCam(MODES[(MODES.indexOf(CAM.mode) + 1) % MODES.length]); }
+document.querySelectorAll('[data-cam]').forEach((b) => b.addEventListener('click', () => setCam(b.dataset.cam)));
+{
+  const el = renderer.domElement; let drag = null;
+  el.addEventListener('pointerdown', (e) => { drag = { x: e.clientX, y: e.clientY }; el.setPointerCapture(e.pointerId); el.focus(); if (document.activeElement && document.activeElement !== el) document.activeElement.blur(); });
+  el.addEventListener('pointermove', (e) => {
+    if (!drag) return;
+    const dx = e.clientX - drag.x, dy = e.clientY - drag.y; drag = { x: e.clientX, y: e.clientY };
+    if (CAM.mode === 'orbit') CAM.orbitYaw -= dx * 0.006; else CAM.yawOff -= dx * 0.006;
+    CAM.pitch = clamp(CAM.pitch + dy * 0.004, 0.06, 1.45);
+  });
+  el.addEventListener('pointerup', () => { drag = null; });
+  el.addEventListener('wheel', (e) => { e.preventDefault(); CAM.dist = clamp(CAM.dist * Math.exp(e.deltaY * 0.001), 1.4, 16); }, { passive: false });
+  el.addEventListener('dblclick', () => { CAM.yawOff = 0; CAM.pitch = 0.42; CAM.dist = 3.8; });
+}
+function updateCamera(dt) {
+  const k = 1 - Math.exp(-dt * 8);
+  CAM.target.lerp(W(R.x, R.y, 0.35), k);
+  CAM.hs += wrapRad(R.th - CAM.hs) * (1 - Math.exp(-dt * 3.5));
+  let pos, look = CAM.target;
+  if (CAM.mode === 'chase' || CAM.mode === 'orbit') {
+    const yaw = CAM.mode === 'chase' ? CAM.hs + CAM.yawOff : CAM.orbitYaw;
+    const h = CAM.dist * Math.cos(CAM.pitch);
+    pos = CAM.target.clone().add(W(-Math.cos(yaw) * h, -Math.sin(yaw) * h, CAM.dist * Math.sin(CAM.pitch)));
+  } else if (CAM.mode === 'driver') {
+    pos = W(-0.7, FW / 2 + 1.2, 1.75);
+  } else {
+    pos = W(FL / 2, -4.2, 14); look = W(FL / 2, FW / 2 - 0.4, 0);
+  }
+  CAM.pos.lerp(pos, CAM.mode === 'chase' ? 1 - Math.exp(-dt * 10) : 1);
+  camera.position.copy(CAM.pos); camera.lookAt(look);
+}
+CAM.pos.copy(W(R.x - 3.3, R.y, 1.6));
+
+function resize() {
+  const w = stage.clientWidth, h = stage.clientHeight;
+  renderer.setSize(w, h, false); camera.aspect = w / Math.max(1, h); camera.updateProjectionMatrix();
+}
+new ResizeObserver(resize).observe(stage); resize();
+
+// ---------------- draw robot state ----------------
+const tmpV = new THREE.Vector3();
+function syncScene(dt) {
+  robotG.position.set(R.x, 0, -R.y); robotG.rotation.y = R.th;
+  R.mods.forEach((m, i) => {
+    const mm = modMeshes[i];
+    mm.g.rotation.y = m.angle; mm.spinner.rotation.z = m.roll;
+    const ta = m.tgtAngle + (m.tgtSpeed < 0 ? Math.PI : 0);
+    const len = 0.06 + 0.22 * Math.min(1, Math.abs(m.tgtSpeed) / P.maxSpeed);
+    mm.arrow.scale.set(len, 1, 1); mm.arrow.rotation.y = ta;
+    mm.arrow.position.copy(L3(m.x + Math.cos(ta) * len / 2, m.y + Math.sin(ta) * len / 2, 0.006));
+  });
+  flyG.rotation.z = -HW.shooter.spin;
+  rollerG.rotation.z = HW.roller.spin;
+  pivot.rotation.z = -hingeAngle();
+  led.material.color.setHex(V.has ? 0x46c083 : 0x5a2220);
+  hopperBalls.count = Math.min(60, R.hopper);
+  for (let i = 0; i < POOL; i++) {
+    const b = balls[i];
+    ballMesh.setMatrixAt(i, b.active ? m4.makeTranslation(b.x, b.z, -b.y) : ZERO);
+  }
+  ballMesh.instanceMatrix.needsUpdate = true;
+  for (const h of HUBS) {
+    h.flash = Math.max(0, h.flash - dt * 2.5);
+    h.band.material.emissiveIntensity = 0.2 + h.flash * 2.2;
+    h.tagFrame.material.opacity = V.has && V.id === h.tag.id ? 0.9 : 0;
+  }
+  trailT += dt;
+  if (trailT > 0.04) {
+    trailT = 0;
+    const arr = trailGeo.attributes.position.array;
+    if (trailN >= TRAIL) { arr.copyWithin(0, 3); trailN = TRAIL - 1; }
+    arr[trailN * 3] = R.x; arr[trailN * 3 + 1] = 0.012; arr[trailN * 3 + 2] = -R.y; trailN++;
+    trailGeo.setDrawRange(0, trailN); trailGeo.attributes.position.needsUpdate = true;
+  }
+  const c = Math.cos(R.th), s = Math.sin(R.th);
+  const cfx = c * R.cmd.vx - s * R.cmd.vy, cfy = s * R.cmd.vx + c * R.cmd.vy;
+  const base = W(R.x, R.y, 0.9);
+  const setArrow = (a, vx, vy) => {
+    const sp = Math.hypot(vx, vy); a.visible = sp > 0.08;
+    if (a.visible) { a.position.copy(base); a.setDirection(tmpV.set(vx, 0, -vy).normalize()); a.setLength(0.25 + sp * 0.35, 0.14, 0.09); }
+  };
+  setArrow(cmdArrow, cfx, cfy); setArrow(actArrow, R.vx, R.vy);
+}
+
+// =====================================================================
+// HUD + panels
+// =====================================================================
+function css(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+const COL = { fg: css('--fg'), muted: css('--muted'), line: css('--line'), accent: css('--accent'), panel2: css('--panel-2'), good: css('--good') };
+
+function drawPad(cv, p, isDriver) {
+  const g = cv.getContext('2d'), w = cv.width, h = cv.height;
+  g.clearRect(0, 0, w, h);
+  const stick = (cx, cy, x, y, active) => {
+    g.strokeStyle = COL.line; g.lineWidth = 3; g.beginPath(); g.arc(cx, cy, 40, 0, Math.PI * 2); g.stroke();
+    g.strokeStyle = 'rgba(255,255,255,0.08)'; g.beginPath(); g.moveTo(cx - 40, cy); g.lineTo(cx + 40, cy); g.moveTo(cx, cy - 40); g.lineTo(cx, cy + 40); g.stroke();
+    g.fillStyle = active ? COL.accent : COL.muted; g.beginPath(); g.arc(cx + x * 36, cy + y * 36, 9, 0, Math.PI * 2); g.fill();
+  };
+  stick(56, 84, p.lx, p.ly, isDriver && Math.abs(p.lx) > P.deadband);
+  stick(w - 56, 84, p.rx, p.ry, isDriver && Math.hypot(p.rx, p.ry) > P.deadband);
+  const bar = (x, v, label) => {
+    g.fillStyle = COL.line; g.fillRect(x, 14, 34, 8); g.fillStyle = v > 0.5 ? COL.accent : COL.muted; g.fillRect(x, 14, 34 * v, 8);
+    g.fillStyle = COL.muted; g.font = '600 15px "Barlow Semi Condensed", sans-serif'; g.fillText(label, x + 40, 23);
+  };
+  bar(20, p.lt, 'LT'); bar(w - 94, p.rt, 'RT');
+  const btns = isDriver ? [['Y', p.y], ['Bk', p.back]] : [['A', p.a], ['B', p.b], ['X', p.x], ['LB', p.lb], ['RB', p.rb], ['St', p.start]];
+  g.font = '600 14px "Barlow Semi Condensed", sans-serif'; g.textAlign = 'center';
+  const bw = 26, x0 = w / 2 - (btns.length * bw) / 2 + bw / 2;
+  btns.forEach(([l, on], i) => {
+    const cx = x0 + i * bw, cy = btns.length > 2 ? 60 + (i % 2) * 34 : 80;
+    g.fillStyle = on ? COL.accent : 'rgba(255,255,255,0.06)'; g.beginPath(); g.arc(cx, cy, 12, 0, Math.PI * 2); g.fill();
+    g.fillStyle = on ? '#1a1206' : COL.muted; g.fillText(l, cx, cy + 5);
+  });
+  g.textAlign = 'start';
+}
+
+const WARN_DEFS = [
+  { id: 'nan', bad: true, on: () => simT - HW.nanAt < 2, text: 'calculateTargetRPM() returned NaN (tag closer than 0.655 m), so the shooter was sent NaN. The sim treats it as 0.' },
+  { id: 'rev', on: () => HW.shooter.out < 0, text: () => `Auto shooter output is ${HW.shooter.out.toFixed(2)}. The trigger command spins it positive, so one direction is likely reversed.` },
+  { id: 'desat', on: () => R.desat, text: 'Wheel speeds hit MAX_SPEED. YAGSL scaled all four down, so translation and rotation both slowed.' },
+  { id: 'slip', bad: true, on: () => R.mods.some((m) => m.slip), text: 'Wheels slipping: the requested force exceeds grip (COF × weight).' },
+  { id: 'cur', on: () => R.mods.some((m) => Math.abs(m.current) >= P.driveCurrent - 0.01), text: () => `Drive motors at the ${P.driveCurrent} A current limit, which caps acceleration.` },
+  { id: 'full', on: () => R.hopper >= P.hopperCap, text: 'Hopper full.' },
+  { id: 'empty', on: () => HW.indexer.out < -0.05 && R.hopper === 0, text: 'Indexer running with an empty hopper. Drive the intake into fuel with rollers on (2).' },
+];
+let hudT = 0;
+const legendKeys = [...document.querySelectorAll('#legendKeys .key')];
+function updateHUD(dt) {
+  hudT += dt;
+  drawPad($('#pad0'), PAD.driver, true); drawPad($('#pad1'), PAD.op, false);
+  for (const el of legendKeys) el.classList.toggle('down', KB.has(el.dataset.k));
+  if (hudT < 0.1) return; hudT = 0;
+  const modeChip = $('#modeChip');
+  modeChip.textContent = P.fieldRel ? 'Field-relative' : 'Robot-relative'; modeChip.classList.toggle('field', P.fieldRel);
+  const list = [...sched.running].map((c) => {
+    const leaf = c.leaf(); const d = c.name === 'drive (default)';
+    return `<div class="${d ? 'def' : ''}">${c.name}${leaf && leaf !== c.name ? ' › ' + leaf : ''}</div>`;
+  });
+  $('#cmds').innerHTML = '<span class="k">Running commands</span>' + (list.join('') || '<div class="def">none</div>');
+  $('#warns').innerHTML = WARN_DEFS.filter((w) => w.on()).map((w) => `<div class="warn${w.bad ? ' bad' : ''}">${typeof w.text === 'function' ? w.text() : w.text}</div>`).join('');
+  const scored = HUBS.reduce((a, h) => a + h.score, 0);
+  $('#sScore').innerHTML = `${scored}<small> / ${R.shots}</small>`;
+  $('#sHopper').innerHTML = `${R.hopper}<small> / ${P.hopperCap}</small>`;
+  const hub = HUBS.reduce((a, h) => (Math.hypot(h.x - R.x, h.y - R.y) < Math.hypot(a.x - R.x, a.y - R.y) ? h : a));
+  const hd = Math.hypot(hub.x - R.x, hub.y - R.y);
+  const aim = Math.abs(wrapRad(Math.atan2(hub.y - R.y, hub.x - R.x) - R.th)) * DEG;
+  const inRange = band && hd >= band[0] && hd <= band[1];
+  const sHub = $('#sHub');
+  sHub.innerHTML = `${hd.toFixed(1)}<small> m</small>`;
+  sHub.classList.toggle('in', !!inRange && aim < 6);
+  sHub.title = !band ? 'Shots cannot reach the hub with the current settings.'
+    : inRange ? (aim < 6 ? 'In range and aimed. Hold Space.' : `In range, but turn ${aim.toFixed(0)}° to face the hub.`)
+    : `Move to ${band[0].toFixed(1)}–${band[1].toFixed(1)} m from the hub (the green ring).`;
+  $('#sSpeed').innerHTML = `${Math.hypot(R.vx, R.vy).toFixed(2)}<small> m/s</small>`;
+  const head = ((R.th - R.gyroOff) * DEG + 360) % 360;
+  $('#sHead').textContent = `${head.toFixed(0)}°`;
+  const src = (i) => (padsSeen[i] ? 'Gamepad ' + (i + 1) : (i === 1 && padsSeen[0] ? 'Gamepad 1' : 'Keyboard'));
+  $('#padSrc0').textContent = src(0); $('#padSrc1').textContent = src(1);
+  if (!$('#pane-telem').hidden) updateTelemetry();
+}
+
+// telemetry
+const SD_KEYS = [
+  ['Target Visible', () => V.has, 'bool'], ['Tag ID', () => (V.has ? V.id : '—')], ['Tag Distance x', () => V.x.toFixed(2)], ['Tag Yaw', () => V.yaw.toFixed(2)],
+  ['Target RPM', () => { const t = calculateTargetRPM(); return Number.isNaN(t) ? 'NaN' : t.toFixed(3); }],
+  ['Current Shooter RPM', () => HW.shooter.rpm.toFixed(0)], ['Shooter Ready', () => isAtTargetSpeed(), 'bool'],
+  ['Shooter output', () => HW.shooter.out.toFixed(2)], ['Indexer output', () => HW.indexer.out.toFixed(2)],
+  ['Hinge Rotations', () => HW.lift.rot.toFixed(2)], ['Hinge output', () => HW.lift.applied.toFixed(3)], ['Hinge isDown', () => INTAKE.isDown, 'bool'],
+  ['Roller RPM', () => HW.roller.rpm.toFixed(0)], ['Roller output', () => HW.roller.out.toFixed(2)],
+  ['Gyro heading (°)', () => (wrapRad(R.th - R.gyroOff) * DEG).toFixed(1)],
+];
+{
+  const sd = $('#sd');
+  sd.innerHTML = SD_KEYS.map(([k], i) => `<div>${k}</div><div class="v" id="sd${i}"></div>`).join('');
+  $('#modTbl tbody').innerHTML = R.mods.map((m, i) => `<tr id="mr${i}"><td>${m.name}</td><td></td><td></td><td></td><td></td><td></td></tr>`).join('');
+}
+function updateTelemetry() {
+  SD_KEYS.forEach(([, f, t], i) => {
+    const el = $('#sd' + i), v = f();
+    if (t === 'bool') { el.textContent = v ? 'true' : 'false'; el.className = 'v ' + (v ? 'on' : 'off'); } else el.textContent = v;
+  });
+  R.mods.forEach((m, i) => {
+    const td = $('#mr' + i).children;
+    td[1].textContent = (m.tgtAngle * DEG).toFixed(1); td[2].textContent = (m.angle * DEG).toFixed(1);
+    td[3].textContent = m.tgtSpeed.toFixed(2); td[4].textContent = m.vLong.toFixed(2);
+    td[5].textContent = m.current.toFixed(1); td[5].className = m.slip ? 'slip' : '';
+  });
+  drawChart();
+}
+function drawChart() {
+  const cv = $('#chart'), dpr = Math.min(devicePixelRatio, 2);
+  const w = cv.clientWidth, h = cv.clientHeight;
+  if (cv.width !== Math.round(w * dpr)) { cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr); }
+  const g = cv.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, w, h);
+  const now = simT, span = 8, padL = 34, padR = 6;
+  const panels = [
+    { title: 'Speed (m/s)', y0: 4, h: h / 2 - 14, min: 0, max: Math.max(5, P.maxSpeed + 0.5), c: 'cs', a: 'as' },
+    { title: 'Turn rate (rad/s)', y0: h / 2 + 8, h: h / 2 - 14, min: -Math.max(5, P.rotScale + 1), max: Math.max(5, P.rotScale + 1), c: 'cw', a: 'aw' },
+  ];
+  g.font = '11px "IBM Plex Mono", monospace';
+  for (const p of panels) {
+    const Y = (v) => p.y0 + 14 + (1 - (v - p.min) / (p.max - p.min)) * (p.h - 14);
+    const X = (t) => padL + (1 - (now - t) / span) * (w - padL - padR);
+    g.fillStyle = COL.muted; g.fillText(p.title, padL, p.y0 + 9);
+    const ticks = p.min < 0 ? [p.min, 0, p.max] : [0, p.max / 2, p.max];
+    for (const tv of ticks) {
+      g.strokeStyle = 'rgba(255,255,255,0.06)'; g.beginPath(); g.moveTo(padL, Y(tv)); g.lineTo(w - padR, Y(tv)); g.stroke();
+      g.fillStyle = COL.muted; g.textAlign = 'right'; g.fillText(tv.toFixed(1), padL - 4, Y(tv) + 4); g.textAlign = 'start';
+    }
+    for (const [key, color, wdt] of [[p.c, COL.accent, 1.5], [p.a, COL.fg, 1.5]]) {
+      g.strokeStyle = color; g.lineWidth = wdt; g.beginPath();
+      HIST.forEach((s, i) => { const x = X(s.t), y = Y(clamp(s[key], p.min, p.max)); i ? g.lineTo(x, y) : g.moveTo(x, y); });
+      g.stroke();
+    }
+  }
+}
+
+// tabs
+document.querySelectorAll('[role="tab"]').forEach((t) => t.addEventListener('click', () => {
+  document.querySelectorAll('[role="tab"]').forEach((o) => o.setAttribute('aria-selected', String(o === t)));
+  for (const id of ['tune', 'telem', 'ctl']) $('#pane-' + id).hidden = id !== t.dataset.tab;
+  try { localStorage.setItem('testbot-sim-tab', t.dataset.tab); } catch (e) {}
+}));
+try { const tab = localStorage.getItem('testbot-sim-tab'); if (tab) document.querySelector(`[data-tab="${tab}"]`)?.click(); } catch (e) {}
+
+// ---------------- tuning UI ----------------
+const fmt = (v) => (typeof v === 'number' ? String(Number(v.toPrecision(6))) : String(v));
+function setParam(k, v) {
+  P[k] = v; saveParams(); refreshRow(k); refreshChanges();
+  if (k === 'configDir') { applyModPositions(); placeModules(); }
+  if (k === 'hopperCap') R.hopper = Math.min(R.hopper, v);
+  if (k === 'exitSpeed' || k === 'launchAngle' || k === 'shooterDuty') updateRings();
+}
+function refreshRow(k) {
+  const row = document.querySelector(`.prm[data-k="${k}"]`); if (!row) return;
+  const p = META[k], v = P[k];
+  row.classList.toggle('mod', v !== DEF[k]);
+  if (p.type === 'sign' || p.type === 'select' || p.type === 'bool') {
+    row.querySelectorAll('.seg button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.v === String(v))));
+  } else {
+    const num = row.querySelector('input[type="number"]'), rng = row.querySelector('input[type="range"]');
+    if (document.activeElement !== num) num.value = fmt(v);
+    rng.value = v;
+  }
+}
+function buildTune() {
+  const host = $('#pane-tune');
+  for (const g of GROUPS) {
+    const det = document.createElement('details'); det.className = 'grp'; det.open = !!g.open;
+    det.innerHTML = `<summary><span class="g-name">${g.name}</span><span class="g-file">${g.file}</span></summary>${g.note ? `<p class="g-note">${g.note}</p>` : ''}<div class="g-body"></div>`;
+    const body = det.querySelector('.g-body');
+    for (const p of g.params) {
+      const row = document.createElement('div'); row.className = 'prm'; row.dataset.k = p.k;
+      const codeLine = `${p.code ? p.code + ' ' : ''}<span class="src">· ${p.src}</span>`;
+      let ctl;
+      if (p.type === 'sign' || p.type === 'select' || p.type === 'bool') {
+        const opts = p.type === 'sign' ? [['1', '+1'], ['-1', '−1']] : p.type === 'bool' ? [['false', 'false'], ['true', 'true']] : p.options.map((o) => [o, o]);
+        ctl = `<div class="seg" role="group" aria-label="${p.label}">${opts.map(([v, l]) => `<button type="button" data-v="${v}" id="p-${p.k}-${v}">${l}</button>`).join('')}</div>`;
+      } else {
+        ctl = `<div class="num"><input type="number" id="p-${p.k}" step="any" aria-label="${p.label}"><span class="unit">${p.unit || ''}</span></div>`;
+      }
+      row.innerHTML = `<div class="lab"><label for="p-${p.k}">${p.label}<span class="dot" aria-hidden="true"></span><button class="rst" type="button" title="Reset to ${fmt(p.def)}" aria-label="Reset ${p.label}">↺</button></label><span class="code" title="${p.src}">${codeLine}</span></div>${ctl}` +
+        (p.min !== undefined ? `<input class="full" type="range" id="p-${p.k}-r" min="${p.min}" max="${p.max}" step="${p.step}" aria-label="${p.label} slider">` : '') +
+        (p.help ? `<p class="help full">${p.help}</p>` : '');
+      body.appendChild(row);
+      row.querySelector('.rst').addEventListener('click', (e) => { e.preventDefault(); setParam(p.k, DEF[p.k]); });
+      if (p.type === 'sign') row.querySelectorAll('.seg button').forEach((b) => b.addEventListener('click', () => setParam(p.k, Number(b.dataset.v))));
+      else if (p.type === 'bool') row.querySelectorAll('.seg button').forEach((b) => b.addEventListener('click', () => setParam(p.k, b.dataset.v === 'true')));
+      else if (p.type === 'select') row.querySelectorAll('.seg button').forEach((b) => b.addEventListener('click', () => setParam(p.k, b.dataset.v)));
+      else {
+        row.querySelector('input[type="range"]').addEventListener('input', (e) => setParam(p.k, Number(e.target.value)));
+        row.querySelector('input[type="number"]').addEventListener('input', (e) => { const v = parseFloat(e.target.value); if (Number.isFinite(v)) setParam(p.k, v); });
+        row.querySelector('input[type="number"]').addEventListener('blur', () => refreshRow(p.k));
+      }
+    }
+    host.appendChild(det);
+  }
+  for (const k in P) refreshRow(k);
+}
+function changeLines() {
+  return Object.keys(P).filter((k) => P[k] !== DEF[k]).map((k) => {
+    const p = META[k];
+    return p.sim ? `[sim] ${p.label}: ${fmt(DEF[k])} → ${fmt(P[k])}` : `${p.src}  ${p.code}: ${fmt(DEF[k])} → ${fmt(P[k])}`;
+  });
+}
+function refreshChanges() {
+  const lines = changeLines(), codeCount = Object.keys(P).filter((k) => P[k] !== DEF[k] && !META[k].sim).length;
+  $('#chgList').hidden = !lines.length; $('#chgEmpty').hidden = !!lines.length;
+  $('#chgList').textContent = lines.join('\n');
+  $('#chgCount').hidden = !codeCount; $('#chgCount').textContent = codeCount;
+}
+$('#copyChanges').addEventListener('click', async (e) => {
+  const text = changeLines().join('\n') || 'No changes from the robot code.';
+  const btn = e.currentTarget;
+  try { await navigator.clipboard.writeText(text); btn.textContent = 'Copied'; }
+  catch (err) { const sel = getSelection(), r = document.createRange(); $('#chgList').hidden = false; r.selectNodeContents($('#chgList')); sel.removeAllRanges(); sel.addRange(r); btn.textContent = 'Selected'; }
+  setTimeout(() => { btn.textContent = 'Copy'; }, 1400);
+});
+$('#resetAll').addEventListener('click', () => { for (const k in DEF) P[k] = DEF[k]; saveParams(); applyModPositions(); placeModules(); updateRings(); for (const k in P) refreshRow(k); refreshChanges(); });
+buildTune(); refreshChanges();
+
+// sim controls
+let speedScale = 1, paused = false;
+$('#slowBtn').addEventListener('click', (e) => { speedScale = speedScale === 1 ? 0.25 : 1; e.currentTarget.setAttribute('aria-pressed', String(speedScale !== 1)); });
+$('#pauseBtn').addEventListener('click', (e) => { paused = !paused; e.currentTarget.setAttribute('aria-pressed', String(paused)); e.currentTarget.textContent = paused ? 'Resume' : 'Pause'; });
+$('#resetRobot').addEventListener('click', resetRobot);
+$('#resetField').addEventListener('click', () => { resetField(); resetRobot(); });
+
+// help dialog
+const helpEl = $('#help');
+const helpOpen = () => !helpEl.hidden;
+let helpReturn = null;
+function openHelp() { helpReturn = document.activeElement; KB.clear(); helpEl.hidden = false; refreshDirStatus(); helpEl.scrollTop = 0; $('#helpClose').focus({ preventScroll: true }); }
+function closeHelp() {
+  helpEl.hidden = true;
+  try { localStorage.setItem('testbot-sim-welcomed', '1'); } catch (e) {}
+  (helpReturn && helpReturn !== document.body ? helpReturn : renderer.domElement).focus();
+}
+document.querySelectorAll('[data-help]').forEach((b) => b.addEventListener('click', openHelp));
+$('#helpClose').addEventListener('click', closeHelp);
+helpEl.addEventListener('click', (e) => { if (e.target === helpEl) closeHelp(); });
+function refreshDirStatus() {
+  const intuitive = P.fwdSign === -1 && P.rotSign === -1;
+  const coded = P.fwdSign === DEF.fwdSign && P.rotSign === DEF.rotSign;
+  $('#dirStatus').textContent = intuitive ? 'Now using intuitive directions: W drives toward the amber arrow, E turns right. The Tune panel lists this as a change from the code.'
+    : coded ? 'Now using the directions exactly as coded.' : 'Custom signs are set in the Tune panel.';
+}
+$('#useIntuitive').addEventListener('click', () => { setParam('fwdSign', -1); setParam('rotSign', -1); refreshDirStatus(); });
+$('#useCoded').addEventListener('click', () => { setParam('fwdSign', DEF.fwdSign); setParam('rotSign', DEF.rotSign); refreshDirStatus(); });
+let welcomed = false; try { welcomed = localStorage.getItem('testbot-sim-welcomed') === '1'; } catch (e) {}
+if (!welcomed && location.hash !== '#play') openHelp();
+
+// =====================================================================
+// Main loop
+// =====================================================================
+resetField();
+let last = performance.now(), acc = 0;
+function frame(now) {
+  const dt = Math.min(0.05, (now - last) / 1000); last = now;
+  readInputs(dt);
+  if (!paused) {
+    acc += dt * speedScale;
+    let steps = 0;
+    while (acc >= 0.001 && steps < 60) {
+      acc -= 0.001; steps++; tick++; simT = tick / 1000;
+      if (tick % 20 === 0) robotPeriodic();
+      physicsStep(0.001);
+      if (tick % 4 === 0) ballStep(0.004);
+    }
+    if (steps >= 60) acc = 0;
+    ballPairs();
+  }
+  syncScene(paused ? 0 : dt * speedScale);
+  updateCamera(dt);
+  updateHUD(dt);
+  renderer.render(scene, camera);
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
